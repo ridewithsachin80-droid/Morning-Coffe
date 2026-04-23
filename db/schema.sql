@@ -1,64 +1,64 @@
--- Morning Accounts Schema
+-- Morning Accounts Schema (v2 — Coffee Shop Tab)
 
 CREATE TABLE IF NOT EXISTS members (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  pin VARCHAR(60) NOT NULL,         -- bcrypt hash of 4-digit PIN
-  is_admin BOOLEAN DEFAULT FALSE,
-  is_active BOOLEAN DEFAULT TRUE,
+  id         SERIAL PRIMARY KEY,
+  name       VARCHAR(100) NOT NULL UNIQUE,
+  pin        VARCHAR(60)  NOT NULL,
+  is_admin   BOOLEAN DEFAULT FALSE,
+  is_active  BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS items (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL UNIQUE,
-  rate NUMERIC(8,2) NOT NULL DEFAULT 0,
-  is_active BOOLEAN DEFAULT TRUE,
+  id            SERIAL PRIMARY KEY,
+  name          VARCHAR(100) NOT NULL UNIQUE,
+  rate          NUMERIC(8,2) NOT NULL DEFAULT 0,
+  is_active     BOOLEAN DEFAULT TRUE,
   display_order INT DEFAULT 0,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Each row = one "add" action by a member (like a tab line)
+CREATE TABLE IF NOT EXISTS tab_entries (
+  id          SERIAL PRIMARY KEY,
+  session_id  INT NOT NULL,              -- links to daily_session
+  member_id   INT NOT NULL REFERENCES members(id),
+  item_id     INT REFERENCES items(id),
+  item_name   VARCHAR(100) NOT NULL,     -- snapshot
+  rate        NUMERIC(8,2) NOT NULL,     -- snapshot
+  qty         INT NOT NULL DEFAULT 1,
+  amount      NUMERIC(8,2) GENERATED ALWAYS AS (qty * rate) STORED,
+  added_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- One session per date — admin opens/closes it
+CREATE TABLE IF NOT EXISTS daily_sessions (
+  id         SERIAL PRIMARY KEY,
+  date       DATE NOT NULL UNIQUE DEFAULT CURRENT_DATE,
+  status     VARCHAR(20) DEFAULT 'open',   -- open | paid
+  total      NUMERIC(10,2) DEFAULT 0,
+  paid_at    TIMESTAMPTZ,
+  paid_by    INT REFERENCES members(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS orders (
-  id SERIAL PRIMARY KEY,
-  member_id INT NOT NULL REFERENCES members(id),
-  order_date DATE NOT NULL DEFAULT CURRENT_DATE,
-  status VARCHAR(20) DEFAULT 'pending',   -- pending | approved | paid
-  submitted_at TIMESTAMPTZ DEFAULT NOW(),
-  reviewed_by INT REFERENCES members(id),
-  reviewed_at TIMESTAMPTZ,
-  paid_at TIMESTAMPTZ,
-  note TEXT,
-  UNIQUE(member_id, order_date)           -- one order per member per day
-);
-
-CREATE TABLE IF NOT EXISTS order_items (
-  id SERIAL PRIMARY KEY,
-  order_id INT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  item_id INT NOT NULL REFERENCES items(id),
-  item_name VARCHAR(100) NOT NULL,        -- snapshot at time of order
-  rate NUMERIC(8,2) NOT NULL,             -- snapshot at time of order
-  qty INT NOT NULL DEFAULT 0,
-  amount NUMERIC(8,2) GENERATED ALWAYS AS (qty * rate) STORED,
-  UNIQUE(order_id, item_id)
-);
-
 CREATE TABLE IF NOT EXISTS sessions (
-  id VARCHAR(64) PRIMARY KEY,
-  member_id INT NOT NULL REFERENCES members(id),
+  id         VARCHAR(64) PRIMARY KEY,
+  member_id  INT NOT NULL REFERENCES members(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '12 hours'
 );
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_orders_date   ON orders(order_date);
-CREATE INDEX IF NOT EXISTS idx_orders_member ON orders(member_id);
-CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-CREATE INDEX IF NOT EXISTS idx_sessions_exp  ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_tab_session   ON tab_entries(session_id);
+CREATE INDEX IF NOT EXISTS idx_tab_member    ON tab_entries(member_id);
+CREATE INDEX IF NOT EXISTS idx_tab_added     ON tab_entries(added_at);
+CREATE INDEX IF NOT EXISTS idx_session_date  ON daily_sessions(date);
 
--- Fix PIN column if it was created with wrong size
+-- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 
--- Default items from your Excel
+-- Default items from Excel
 INSERT INTO items (name, rate, display_order) VALUES
   ('Coffee (₹20)',  20, 1),
   ('Coffee (₹15)',  15, 2),
@@ -71,6 +71,3 @@ INSERT INTO items (name, rate, display_order) VALUES
   ('Thare Idli',    20, 9),
   ('Water',          5, 10)
 ON CONFLICT (name) DO NOTHING;
-
--- Default admin (PIN: 0000)
--- PIN hash is set at runtime via /api/setup
