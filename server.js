@@ -1,14 +1,30 @@
 require('dotenv').config();
-const express     = require('express');
-const { Pool }    = require('pg');
-const bcrypt      = require('bcryptjs');
+const express      = require('express');
+const { Pool }     = require('pg');
+const bcrypt       = require('bcryptjs');
 const { v4: uuid } = require('uuid');
 const cookieParser = require('cookie-parser');
-const compression = require('compression');
-const path        = require('path');
+const compression  = require('compression');
+const path         = require('path');
 
-const app  = express();
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+// ── Validate DATABASE_URL early ──
+if (!process.env.DATABASE_URL) {
+  console.error('❌  DATABASE_URL is not set.');
+  console.error('    In Railway: open your service → Variables → add DATABASE_URL from your PostgreSQL plugin.');
+  process.exit(1);
+}
+
+const app = express();
+
+// ── Pool: always rejectUnauthorized:false for Railway/hosted PG ──
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  max: 10,
+});
+pool.on('error', (err) => console.error('Pool error:', err.message));
 
 app.use(compression());
 app.use(express.json());
@@ -16,13 +32,23 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ══════════════════════════════════════════════════════════════
-// DB INIT
+// DB INIT — retries so Railway PG has time to start
 // ══════════════════════════════════════════════════════════════
-async function initDB() {
+async function initDB(retries = 8, delay = 3000) {
   const fs = require('fs');
   const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
-  await pool.query(schema);
-  console.log('✅ DB schema ready');
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await pool.query(schema);
+      console.log('✅ DB schema ready');
+      return;
+    } catch (e) {
+      console.error(`DB connect attempt ${i}/${retries}: ${e.message}`);
+      if (i === retries) throw e;
+      console.log(`Retrying in ${delay / 1000}s…`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -31,13 +57,15 @@ async function initDB() {
 async function auth(req, res, next) {
   const token = req.cookies.session || req.headers['x-session'];
   if (!token) return res.status(401).json({ error: 'Not logged in' });
-  const { rows } = await pool.query(
-    `SELECT s.member_id, m.name, m.is_admin, m.is_active
-     FROM sessions s JOIN members m ON m.id = s.member_id
-     WHERE s.id = $1 AND s.expires_at > NOW()`, [token]);
-  if (!rows.length || !rows[0].is_active) return res.status(401).json({ error: 'Session expired' });
-  req.user = rows[0];
-  next();
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.member_id, m.name, m.is_admin, m.is_active
+       FROM sessions s JOIN members m ON m.id = s.member_id
+       WHERE s.id = $1 AND s.expires_at > NOW()`, [token]);
+    if (!rows.length || !rows[0].is_active) return res.status(401).json({ error: 'Session expired' });
+    req.user = rows[0];
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
 }
 
 function adminOnly(req, res, next) {
@@ -46,7 +74,7 @@ function adminOnly(req, res, next) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// SETUP (first run — create admin)
+// SETUP
 // ══════════════════════════════════════════════════════════════
 app.post('/api/setup', async (req, res) => {
   try {
@@ -61,8 +89,10 @@ app.post('/api/setup', async (req, res) => {
 });
 
 app.get('/api/setup/status', async (req, res) => {
-  const { rows } = await pool.query('SELECT id FROM members WHERE is_admin = TRUE LIMIT 1');
-  res.json({ setupDone: rows.length > 0 });
+  try {
+    const { rows } = await pool.query('SELECT id FROM members WHERE is_admin = TRUE LIMIT 1');
+    res.json({ setupDone: rows.length > 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -79,9 +109,8 @@ app.post('/api/login', async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'Wrong PIN' });
     const token = uuid();
     await pool.query('INSERT INTO sessions (id, member_id) VALUES ($1, $2)', [token, rows[0].id]);
-    // Clean old sessions
     await pool.query('DELETE FROM sessions WHERE expires_at < NOW()');
-    res.cookie('session', token, { httpOnly: true, sameSite: 'lax', maxAge: 12*60*60*1000 });
+    res.cookie('session', token, { httpOnly: true, sameSite: 'lax', maxAge: 12 * 60 * 60 * 1000 });
     res.json({ ok: true, name: rows[0].name, isAdmin: rows[0].is_admin, token });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -130,7 +159,7 @@ app.delete('/api/items/:id', auth, adminOnly, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// MEMBERS (admin)
+// MEMBERS
 // ══════════════════════════════════════════════════════════════
 app.get('/api/members', auth, adminOnly, async (req, res) => {
   const { rows } = await pool.query(
@@ -156,10 +185,10 @@ app.put('/api/members/:id', auth, adminOnly, async (req, res) => {
     let query, params;
     if (pin) {
       const hash = await bcrypt.hash(String(pin), 10);
-      query = 'UPDATE members SET name=$1, pin=$2, is_active=$3 WHERE id=$4 RETURNING id,name,is_admin,is_active';
+      query  = 'UPDATE members SET name=$1, pin=$2, is_active=$3 WHERE id=$4 RETURNING id,name,is_admin,is_active';
       params = [name, hash, is_active ?? true, req.params.id];
     } else {
-      query = 'UPDATE members SET name=$1, is_active=$2 WHERE id=$3 RETURNING id,name,is_admin,is_active';
+      query  = 'UPDATE members SET name=$1, is_active=$2 WHERE id=$3 RETURNING id,name,is_admin,is_active';
       params = [name, is_active ?? true, req.params.id];
     }
     const { rows } = await pool.query(query, params);
@@ -168,7 +197,6 @@ app.put('/api/members/:id', auth, adminOnly, async (req, res) => {
 });
 
 app.delete('/api/members/:id', auth, adminOnly, async (req, res) => {
-  // Soft delete — keeps history
   await pool.query('UPDATE members SET is_active = FALSE WHERE id = $1 AND is_admin = FALSE', [req.params.id]);
   res.json({ ok: true });
 });
@@ -176,8 +204,6 @@ app.delete('/api/members/:id', auth, adminOnly, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // ORDERS — MEMBER
 // ══════════════════════════════════════════════════════════════
-
-// Get my order for a date (or today)
 app.get('/api/orders/mine', auth, async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
   const { rows: orders } = await pool.query(
@@ -188,15 +214,13 @@ app.get('/api/orders/mine', auth, async (req, res) => {
   res.json({ order: orders[0], items: oi });
 });
 
-// Submit / update order for today
 app.post('/api/orders', auth, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const date = req.body.date || new Date().toISOString().split('T')[0];
-    const itemsData = req.body.items; // [{ item_id, qty }]
+    const date      = req.body.date || new Date().toISOString().split('T')[0];
+    const itemsData = req.body.items;
 
-    // Upsert order
     const { rows: existing } = await client.query(
       'SELECT id, status FROM orders WHERE member_id = $1 AND order_date = $2',
       [req.user.member_id, date]);
@@ -217,7 +241,6 @@ app.post('/api/orders', auth, async (req, res) => {
       orderId = rows[0].id;
     }
 
-    // Fetch current item rates (snapshot)
     for (const it of itemsData) {
       if (!it.qty || it.qty <= 0) continue;
       const { rows: itemRow } = await client.query('SELECT * FROM items WHERE id = $1', [it.item_id]);
@@ -235,7 +258,6 @@ app.post('/api/orders', auth, async (req, res) => {
   } finally { client.release(); }
 });
 
-// Member: view own history
 app.get('/api/orders/history', auth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT o.*, COALESCE(SUM(oi.amount),0) as total
@@ -248,12 +270,9 @@ app.get('/api/orders/history', auth, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 // ORDERS — ADMIN
 // ══════════════════════════════════════════════════════════════
-
-// All orders (with filters)
 app.get('/api/admin/orders', auth, adminOnly, async (req, res) => {
   const { status, from, to, member_id } = req.query;
-  let where = ['1=1'];
-  let params = [];
+  let where = ['1=1'], params = [];
   if (status)    { params.push(status);    where.push(`o.status = $${params.length}`); }
   if (from)      { params.push(from);      where.push(`o.order_date >= $${params.length}`); }
   if (to)        { params.push(to);        where.push(`o.order_date <= $${params.length}`); }
@@ -270,7 +289,6 @@ app.get('/api/admin/orders', auth, adminOnly, async (req, res) => {
   res.json(rows);
 });
 
-// Get full detail of one order
 app.get('/api/admin/orders/:id', auth, adminOnly, async (req, res) => {
   const { rows: order } = await pool.query(
     `SELECT o.*, m.name as member_name FROM orders o JOIN members m ON m.id=o.member_id WHERE o.id=$1`,
@@ -280,7 +298,6 @@ app.get('/api/admin/orders/:id', auth, adminOnly, async (req, res) => {
   res.json({ order: order[0], items: oi });
 });
 
-// Approve order (admin reviewed it)
 app.post('/api/admin/orders/:id/approve', auth, adminOnly, async (req, res) => {
   await pool.query(
     `UPDATE orders SET status='approved', reviewed_by=$1, reviewed_at=NOW() WHERE id=$2`,
@@ -288,7 +305,6 @@ app.post('/api/admin/orders/:id/approve', auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Reject order back to pending
 app.post('/api/admin/orders/:id/reject', auth, adminOnly, async (req, res) => {
   await pool.query(
     `UPDATE orders SET status='pending', reviewed_by=NULL, reviewed_at=NULL WHERE id=$1`,
@@ -296,9 +312,8 @@ app.post('/api/admin/orders/:id/reject', auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Mark a batch as paid (to coffee shop)
 app.post('/api/admin/pay', auth, adminOnly, async (req, res) => {
-  const { orderIds } = req.body; // array of order IDs
+  const { orderIds } = req.body;
   if (!orderIds || !orderIds.length) return res.status(400).json({ error: 'No orders selected' });
   await pool.query(
     `UPDATE orders SET status='paid', paid_at=NOW() WHERE id = ANY($1::int[]) AND status='approved'`,
@@ -306,32 +321,21 @@ app.post('/api/admin/pay', auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin: daily summary
 app.get('/api/admin/summary', auth, adminOnly, async (req, res) => {
   const { from, to } = req.query;
   const f = from || new Date().toISOString().split('T')[0];
   const t = to   || new Date().toISOString().split('T')[0];
   const { rows } = await pool.query(
-    `SELECT
-       oi.item_name, oi.rate,
-       SUM(oi.qty) as total_qty,
-       SUM(oi.amount) as total_amount,
-       o.status
-     FROM order_items oi
-     JOIN orders o ON o.id = oi.order_id
+    `SELECT oi.item_name, oi.rate, SUM(oi.qty) as total_qty, SUM(oi.amount) as total_amount, o.status
+     FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE o.order_date BETWEEN $1 AND $2
-     GROUP BY oi.item_name, oi.rate, o.status
-     ORDER BY oi.item_name`, [f, t]);
-
+     GROUP BY oi.item_name, oi.rate, o.status ORDER BY oi.item_name`, [f, t]);
   const { rows: memberTotals } = await pool.query(
     `SELECT m.name, o.status, COALESCE(SUM(oi.amount),0) as total
-     FROM orders o
-     JOIN members m ON m.id = o.member_id
+     FROM orders o JOIN members m ON m.id = o.member_id
      LEFT JOIN order_items oi ON oi.order_id = o.id
      WHERE o.order_date BETWEEN $1 AND $2
-     GROUP BY m.name, o.status
-     ORDER BY total DESC`, [f, t]);
-
+     GROUP BY m.name, o.status ORDER BY total DESC`, [f, t]);
   res.json({ itemSummary: rows, memberSummary: memberTotals });
 });
 
@@ -344,6 +348,6 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public/index.html'
 // START
 // ══════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
-initDB().then(() => {
-  app.listen(PORT, () => console.log(`☕ Morning Accounts running on port ${PORT}`));
-}).catch(e => { console.error('DB init failed:', e); process.exit(1); });
+initDB()
+  .then(() => app.listen(PORT, () => console.log(`☕ Morning Accounts running on port ${PORT}`)))
+  .catch(e => { console.error('DB init failed:', e.message); process.exit(1); });
