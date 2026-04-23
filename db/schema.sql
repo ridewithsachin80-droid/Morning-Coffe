@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS members (
   id SERIAL PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
-  pin VARCHAR(6) NOT NULL,          -- 4-digit PIN (stored as bcrypt hash in app)
+  pin VARCHAR(60) NOT NULL,         -- bcrypt hash of 4-digit PIN
   is_admin BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -54,6 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_orders_date   ON orders(order_date);
 CREATE INDEX IF NOT EXISTS idx_orders_member ON orders(member_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_exp  ON sessions(expires_at);
+
+-- Fix PIN column if it was created with wrong size
+ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 
 -- Default items from your Excel
 INSERT INTO items (name, rate, display_order) VALUES
