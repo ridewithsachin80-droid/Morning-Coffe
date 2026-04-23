@@ -309,8 +309,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 
   <!-- ════ PAGE: ORDERS (admin) ════ -->
   <div class="page" id="page-orders">
+
     <div class="card">
-      <div class="card-title">🔍 Filter Orders</div>
+      <div class="card-title">🔍 Filter</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
         <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0;">
           <label class="form-label">From</label>
@@ -320,29 +321,59 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
           <label class="form-label">To</label>
           <input type="date" class="form-input" id="ordTo">
         </div>
-        <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0;">
-          <label class="form-label">Status</label>
-          <select class="form-select" id="ordStatus">
-            <option value="">All</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="paid">Paid</option>
-          </select>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="loadOrders()">Search</button>
+        <button class="btn btn-primary btn-sm" onclick="loadOrders()">🔍 Search</button>
+        <button class="btn btn-ghost btn-sm" onclick="setOrdToday()">Today</button>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title flex-between">
-        <span>📋 Orders</span>
-        <div class="flex gap-8">
-          <button class="btn btn-info btn-sm" onclick="approveSelected()">✅ Approve Selected</button>
-          <button class="btn btn-success btn-sm" onclick="paySelected()">💰 Mark Paid</button>
-        </div>
-      </div>
-      <div id="ordersList"></div>
+    <div class="tab-bar">
+      <div class="tab-pill active" id="tab-pending" onclick="switchOrderTab('pending')">⏳ Pending <span id="cnt-pending" class="badge" style="background:rgba(133,100,4,.15);color:#856404;margin-left:4px;"></span></div>
+      <div class="tab-pill" id="tab-approved" onclick="switchOrderTab('approved')">✅ Approved <span id="cnt-approved" class="badge" style="background:rgba(12,84,96,.15);color:#0c5460;margin-left:4px;"></span></div>
+      <div class="tab-pill" id="tab-paid" onclick="switchOrderTab('paid')">💰 Paid <span id="cnt-paid" class="badge" style="background:rgba(21,87,36,.15);color:#155724;margin-left:4px;"></span></div>
     </div>
+
+    <div id="ordersTab-pending">
+      <div class="card">
+        <div class="card-title flex-between">
+          <span>⏳ Pending Review</span>
+          <div class="flex gap-8">
+            <button class="btn btn-ghost btn-sm" onclick="selectAllOrders('pending')">Select All</button>
+            <button class="btn btn-info btn-sm" onclick="approveSelected()">✅ Approve Selected</button>
+          </div>
+        </div>
+        <div id="list-pending"></div>
+      </div>
+    </div>
+
+    <div id="ordersTab-approved" style="display:none;">
+      <div class="summary-bar" id="approvedSummaryBar" style="display:none;">
+        <h3>💰 Ready to Pay Coffee Shop</h3>
+        <div id="approvedSummaryItems"></div>
+        <div style="border-top:1px solid rgba(255,255,255,.2);margin-top:10px;padding-top:10px;" class="flex-between">
+          <span>Total to Pay</span>
+          <span class="grand-total-label" id="approvedGrandTotal">₹0</span>
+        </div>
+        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;" onclick="payAllApproved()">💰 Pay All to Coffee Shop</button>
+      </div>
+      <div class="card">
+        <div class="card-title flex-between">
+          <span>✅ Approved Orders</span>
+          <div class="flex gap-8">
+            <button class="btn btn-ghost btn-sm" onclick="selectAllOrders('approved')">Select All</button>
+            <button class="btn btn-success btn-sm" onclick="paySelected()">💰 Pay Selected</button>
+          </div>
+        </div>
+        <div id="list-approved"></div>
+      </div>
+    </div>
+
+    <div id="ordersTab-paid" style="display:none;">
+      <div class="card">
+        <div class="card-title">💰 Paid Orders</div>
+        <div id="list-paid"></div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ════ PAGE: MEMBERS (admin) ════ -->
@@ -635,7 +666,10 @@ function showPage(name) {
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+  // Handle full ISO timestamps ("2026-04-23T00:00:00.000Z") or plain dates ("2026-04-23")
+  const dateStr = String(d).substring(0, 10);
+  const [y, m, day] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
 }
 function initials(name) { return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
 
@@ -797,6 +831,15 @@ async function loadDashboard() {
 // ══════════════════════════════════════════════════════════
 // ORDERS (admin)
 // ══════════════════════════════════════════════════════════
+let currentOrderTab = 'pending';
+let allOrdersCache  = { pending: [], approved: [], paid: [] };
+
+function setOrdToday() {
+  document.getElementById('ordFrom').value = todayStr();
+  document.getElementById('ordTo').value   = todayStr();
+  loadOrders();
+}
+
 function initOrders() {
   if (!document.getElementById('ordFrom').value) {
     document.getElementById('ordFrom').value = todayStr();
@@ -806,66 +849,124 @@ function initOrders() {
 }
 
 async function loadOrders() {
-  const from   = document.getElementById('ordFrom').value;
-  const to     = document.getElementById('ordTo').value;
-  const status = document.getElementById('ordStatus').value;
-  const list   = document.getElementById('ordersList');
-  list.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  const from = document.getElementById('ordFrom').value;
+  const to   = document.getElementById('ordTo').value;
+
+  // Load all three statuses in parallel
   try {
-    let url = `/api/admin/orders?`;
-    if (from) url += `from=${from}&`;
-    if (to)   url += `to=${to}&`;
-    if (status) url += `status=${status}`;
-    const rows = await api('GET', url);
-    if (!rows.length) {
-      list.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No orders found</p></div>';
-      return;
-    }
-    list.innerHTML = rows.map(o => `
-      <div class="order-card ${o.status}" style="margin-bottom:10px;">
-        <div class="order-card-header">
-          <div class="checkbox-row" style="align-items:flex-start;">
-            <input type="checkbox" class="order-cb" data-id="${o.id}" data-status="${o.status}">
-            <div>
-              <div class="order-member">${o.member_name}</div>
-              <div class="order-meta">📅 ${fmtDate(o.order_date)}</div>
-              <div style="margin-top:4px;"><span class="badge badge-${o.status}">${o.status}</span></div>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-            <div class="order-amount">₹${parseFloat(o.total).toLocaleString('en-IN')}</div>
-            <button class="btn btn-ghost btn-sm" onclick="viewOrder(${o.id})">🔍 Detail</button>
+    const [pending, approved, paid] = await Promise.all([
+      api('GET', `/api/admin/orders?status=pending${from?'&from='+from:''}${to?'&to='+to:''}`),
+      api('GET', `/api/admin/orders?status=approved${from?'&from='+from:''}${to?'&to='+to:''}`),
+      api('GET', `/api/admin/orders?status=paid${from?'&from='+from:''}${to?'&to='+to:''}`),
+    ]);
+    allOrdersCache = { pending, approved, paid };
+
+    // Update tab counts
+    document.getElementById('cnt-pending').textContent  = pending.length  || '';
+    document.getElementById('cnt-approved').textContent = approved.length || '';
+    document.getElementById('cnt-paid').textContent     = paid.length     || '';
+
+    renderOrderTab(currentOrderTab);
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+function switchOrderTab(tab) {
+  currentOrderTab = tab;
+  ['pending','approved','paid'].forEach(t => {
+    document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+    document.getElementById('ordersTab-' + t).style.display = t === tab ? '' : 'none';
+  });
+  renderOrderTab(tab);
+}
+
+function renderOrderTab(tab) {
+  const rows = allOrdersCache[tab] || [];
+  const listEl = document.getElementById('list-' + tab);
+
+  if (!listEl) return;
+
+  if (!rows.length) {
+    listEl.innerHTML = `<div class="empty-state"><div class="icon">${tab==='pending'?'✅':tab==='approved'?'⏳':'💰'}</div>
+      <p>${tab==='pending'?'No pending orders — all reviewed!':tab==='approved'?'No approved orders yet':'No paid orders in this range'}</p></div>`;
+    if (tab === 'approved') document.getElementById('approvedSummaryBar').style.display = 'none';
+    return;
+  }
+
+  listEl.innerHTML = rows.map(o => `
+    <div class="order-card ${o.status}" style="margin-bottom:10px;">
+      <div class="order-card-header">
+        <div class="checkbox-row" style="align-items:flex-start;gap:10px;">
+          <input type="checkbox" class="order-cb" data-id="${o.id}" data-status="${o.status}" onchange="onCbChange()">
+          <div>
+            <div class="order-member" style="font-size:1rem;">${o.member_name}</div>
+            <div class="order-meta">📅 ${fmtDate(o.order_date)}</div>
+            ${tab==='paid'?`<div class="order-meta">💰 Paid ${fmtDate(o.paid_at?.substring(0,10))}</div>`:''}
           </div>
         </div>
-      </div>`).join('');
-  } catch(e) { list.innerHTML = `<div class="empty-state"><p>${e.message}</p></div>`; }
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+          <div class="order-amount">₹${parseFloat(o.total).toLocaleString('en-IN')}</div>
+          <button class="btn btn-ghost btn-sm" onclick="viewOrder(${o.id})">🔍 Detail</button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  // Show approved summary bar
+  if (tab === 'approved') {
+    const total = rows.reduce((s,o) => s + parseFloat(o.total), 0);
+    document.getElementById('approvedGrandTotal').textContent = '₹' + total.toLocaleString('en-IN');
+    document.getElementById('approvedSummaryItems').innerHTML =
+      rows.map(o => `<div class="summary-row"><span>${o.member_name}</span><span>₹${parseFloat(o.total).toLocaleString('en-IN')}</span></div>`).join('');
+    document.getElementById('approvedSummaryBar').style.display = '';
+  }
+}
+
+function onCbChange() {
+  // Auto-update "select all" state — nothing needed, just a hook
+}
+
+function selectAllOrders(status) {
+  document.querySelectorAll(`.order-cb[data-status="${status}"]`).forEach(cb => cb.checked = true);
 }
 
 function getSelectedOrders(filterStatus) {
-  return [...document.querySelectorAll('.order-cb:checked')]
-    .filter(cb => !filterStatus || cb.dataset.status === filterStatus)
+  return [...document.querySelectorAll(`.order-cb[data-status="${filterStatus}"]:checked`)]
     .map(cb => parseInt(cb.dataset.id));
 }
 
 async function approveSelected() {
   const ids = getSelectedOrders('pending');
-  if (!ids.length) { toast('Select pending orders to approve'); return; }
+  if (!ids.length) { toast('Tick pending orders to approve'); return; }
   confirm('Approve Orders', `Approve ${ids.length} order(s)?`, async () => {
     for (const id of ids) await api('POST', `/api/admin/orders/${id}/approve`);
     toast(`✅ ${ids.length} order(s) approved`);
-    loadOrders();
-    loadDashboard();
+    await loadOrders();
+    switchOrderTab('approved');
   });
 }
 
 async function paySelected() {
   const ids = getSelectedOrders('approved');
-  if (!ids.length) { toast('Select approved orders to mark as paid'); return; }
-  confirm('Mark as Paid', `Mark ${ids.length} order(s) as paid to coffee shop?`, async () => {
+  if (!ids.length) { toast('Tick approved orders to pay'); return; }
+  confirm('💰 Pay to Coffee Shop', `Mark ${ids.length} order(s) as paid to coffee shop?`, async () => {
     await api('POST', '/api/admin/pay', { orderIds: ids });
     toast(`💰 ${ids.length} order(s) marked as paid`);
-    loadOrders();
+    await loadOrders();
+    switchOrderTab('paid');
   });
+}
+
+async function payAllApproved() {
+  const ids = allOrdersCache.approved.map(o => o.id);
+  if (!ids.length) { toast('No approved orders'); return; }
+  const total = allOrdersCache.approved.reduce((s,o) => s+parseFloat(o.total), 0);
+  confirm('💰 Pay All to Coffee Shop',
+    `Pay ₹${total.toLocaleString('en-IN')} for ${ids.length} order(s) to the coffee shop?`,
+    async () => {
+      await api('POST', '/api/admin/pay', { orderIds: ids });
+      toast(`💰 Paid ₹${total.toLocaleString('en-IN')} — ${ids.length} orders closed`);
+      await loadOrders();
+      switchOrderTab('paid');
+    });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -908,15 +1009,20 @@ async function approveOrderFromDetail() {
   await api('POST', `/api/admin/orders/${detailOrderId}/approve`);
   toast('✅ Order approved');
   closeModal('orderDetailModal');
-  if (document.getElementById('page-dashboard').classList.contains('active')) loadDashboard();
-  else loadOrders();
+  if (document.getElementById('page-dashboard').classList.contains('active')) {
+    loadDashboard();
+  } else {
+    await loadOrders();
+    switchOrderTab('approved');
+  }
 }
 
 async function rejectOrderFromDetail() {
   await api('POST', `/api/admin/orders/${detailOrderId}/reject`);
   toast('↩️ Order sent back to pending');
   closeModal('orderDetailModal');
-  loadOrders();
+  await loadOrders();
+  switchOrderTab('pending');
 }
 
 // ══════════════════════════════════════════════════════════
