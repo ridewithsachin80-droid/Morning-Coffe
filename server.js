@@ -88,7 +88,7 @@ app.post('/api/login', async (req, res) => {
     await pool.query('INSERT INTO sessions (id,member_id) VALUES ($1,$2)', [token, rows[0].id]);
     await pool.query('DELETE FROM sessions WHERE expires_at<NOW()');
     res.cookie('session', token, { httpOnly: true, sameSite: 'lax', maxAge: 12*60*60*1000 });
-    res.json({ ok: true, name: rows[0].name, isAdmin: rows[0].is_admin });
+    res.json({ ok: true, name: rows[0].name, isAdmin: rows[0].is_admin, memberId: rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -252,8 +252,8 @@ app.get('/api/tab/mine', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: get full tab for a date (all members)
-app.get('/api/tab/all', auth, adminOnly, async (req, res) => {
+// Everyone: get full tab for a date (all members) — needed so anyone can view & pay the bill
+app.get('/api/tab/all', auth, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const sess = await getOrCreateSession(date);
@@ -294,8 +294,8 @@ app.get('/api/tab/all', auth, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: record a payment against a session (full or partial)
-app.post('/api/tab/pay', auth, adminOnly, async (req, res) => {
+// Any member: record a payment against a session (full or partial)
+app.post('/api/tab/pay', auth, async (req, res) => {
   try {
     const date = req.body.date || new Date().toISOString().split('T')[0];
     const sess = await getOrCreateSession(date);
@@ -325,11 +325,13 @@ app.post('/api/tab/pay', auth, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: undo a specific payment (mistaken entry)
-app.delete('/api/tab/payments/:id', auth, adminOnly, async (req, res) => {
+// Admin, or whoever made the payment: undo a specific payment (mistaken entry)
+app.delete('/api/tab/payments/:id', auth, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM session_payments WHERE id=$1', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Payment not found' });
+    if (!req.user.is_admin && rows[0].paid_by !== req.user.member_id)
+      return res.status(403).json({ error: 'You can only undo a payment you recorded' });
     const sessionId = rows[0].session_id;
     await pool.query('DELETE FROM session_payments WHERE id=$1', [req.params.id]);
 
