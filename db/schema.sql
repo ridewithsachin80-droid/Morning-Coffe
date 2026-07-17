@@ -31,16 +31,21 @@ CREATE TABLE IF NOT EXISTS tab_entries (
   added_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
--- One session per date — admin opens/closes it
+-- Multiple sessions ("rounds") allowed per date — e.g. morning + evening rounds
 CREATE TABLE IF NOT EXISTS daily_sessions (
   id         SERIAL PRIMARY KEY,
-  date       DATE NOT NULL UNIQUE DEFAULT CURRENT_DATE,
-  status     VARCHAR(20) DEFAULT 'open',   -- open | paid
+  date       DATE NOT NULL DEFAULT CURRENT_DATE,
+  round_no   INT NOT NULL DEFAULT 1,       -- 1st, 2nd, ... round for that date
+  status     VARCHAR(20) DEFAULT 'open',   -- open | partial | paid
   total      NUMERIC(10,2) DEFAULT 0,
   paid_at    TIMESTAMPTZ,
   paid_by    INT REFERENCES members(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration for existing databases created before rounds existed
+ALTER TABLE daily_sessions ADD COLUMN IF NOT EXISTS round_no INT NOT NULL DEFAULT 1;
+ALTER TABLE daily_sessions DROP CONSTRAINT IF EXISTS daily_sessions_date_key;
 
 -- Payments recorded against a daily session (supports partial/split payments)
 CREATE TABLE IF NOT EXISTS session_payments (
@@ -64,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_tab_session   ON tab_entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_tab_member    ON tab_entries(member_id);
 CREATE INDEX IF NOT EXISTS idx_tab_added     ON tab_entries(added_at);
 CREATE INDEX IF NOT EXISTS idx_session_date  ON daily_sessions(date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_date_round ON daily_sessions(date, round_no);
 CREATE INDEX IF NOT EXISTS idx_payments_session ON session_payments(session_id);
 
 -- Fix PIN column if too small (from v1)
