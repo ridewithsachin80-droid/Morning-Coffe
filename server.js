@@ -177,6 +177,18 @@ async function getOrCreateSession(date) {
   return nr[0];
 }
 
+// Compute grand total, amount paid so far, and pending balance for a session
+async function getSessionMoney(sessionId) {
+  const { rows: t } = await pool.query(
+    'SELECT COALESCE(SUM(amount),0) as total FROM tab_entries WHERE session_id=$1', [sessionId]);
+  const { rows: p } = await pool.query(
+    'SELECT COALESCE(SUM(amount),0) as paid FROM session_payments WHERE session_id=$1', [sessionId]);
+  const grandTotal = parseFloat(t[0].total);
+  const amountPaid = parseFloat(p[0].paid);
+  const pending    = Math.max(0, Math.round((grandTotal - amountPaid) * 100) / 100);
+  return { grandTotal, amountPaid, pending };
+}
+
 app.get('/api/session/today', auth, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
@@ -192,7 +204,7 @@ app.post('/api/tab', auth, async (req, res) => {
   try {
     const date  = req.body.date || new Date().toISOString().split('T')[0];
     const sess  = await getOrCreateSession(date);
-    if (sess.status === 'paid') return res.status(400).json({ error: 'Session already paid and closed' });
+    if (sess.status !== 'open') return res.status(400).json({ error: 'Session is locked — payment already started. Ask admin to reopen it.' });
 
     const entries = req.body.entries; // [{ item_id, qty }]
     if (!entries || !entries.length) return res.status(400).json({ error: 'No items provided' });
@@ -219,7 +231,7 @@ app.delete('/api/tab/:id', auth, async (req, res) => {
       'SELECT te.*, ds.status FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id WHERE te.id=$1',
       [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    if (rows[0].status === 'paid') return res.status(400).json({ error: 'Session already paid' });
+    if (rows[0].status !== 'open') return res.status(400).json({ error: 'Session is locked — payment already started' });
     if (!req.user.is_admin && rows[0].member_id !== req.user.member_id)
       return res.status(403).json({ error: 'Not your entry' });
     await pool.query('DELETE FROM tab_entries WHERE id=$1', [req.params.id]);
@@ -270,27 +282,69 @@ app.get('/api/tab/all', auth, adminOnly, async (req, res) => {
     }
 
     const grandTotal = entries.reduce((s, e) => s + parseFloat(e.amount), 0);
-    res.json({ session: sess, byMember, itemSummary, grandTotal, entryCount: entries.length });
+
+    const { rows: payments } = await pool.query(
+      `SELECT sp.*, m.name as paid_by_name
+       FROM session_payments sp LEFT JOIN members m ON m.id = sp.paid_by
+       WHERE sp.session_id=$1 ORDER BY sp.paid_at`, [sess.id]);
+    const amountPaid = payments.reduce((s, p) => s + parseFloat(p.amount), 0);
+    const pending    = Math.max(0, Math.round((grandTotal - amountPaid) * 100) / 100);
+
+    res.json({ session: sess, byMember, itemSummary, grandTotal, entryCount: entries.length, payments, amountPaid, pending });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: mark session as paid
+// Admin: record a payment against a session (full or partial)
 app.post('/api/tab/pay', auth, adminOnly, async (req, res) => {
   try {
     const date = req.body.date || new Date().toISOString().split('T')[0];
+    const sess = await getOrCreateSession(date);
+    if (sess.status === 'paid') return res.status(400).json({ error: 'Session already fully paid' });
+
+    const { grandTotal, pending } = await getSessionMoney(sess.id);
+    if (grandTotal <= 0) return res.status(400).json({ error: 'Nothing to pay yet' });
+
+    // Default to paying the full remaining balance if no amount given
+    let amount = req.body.amount !== undefined && req.body.amount !== null && req.body.amount !== ''
+      ? parseFloat(req.body.amount) : pending;
+    if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' });
+    if (amount > pending + 0.01) return res.status(400).json({ error: `Amount exceeds pending balance of ₹${pending.toFixed(2)}` });
+
+    await pool.query(
+      `INSERT INTO session_payments (session_id, amount, paid_by, note) VALUES ($1,$2,$3,$4)`,
+      [sess.id, Math.round(amount * 100) / 100, req.user.member_id, req.body.note || null]);
+
+    const money = await getSessionMoney(sess.id);
+    const newStatus = money.pending <= 0.01 ? 'paid' : 'partial';
+
     const { rows } = await pool.query(
-      `UPDATE daily_sessions SET status='paid', paid_at=NOW(), paid_by=$1 WHERE date=$2 RETURNING *`,
-      [req.user.member_id, date]);
-    if (!rows.length) return res.status(404).json({ error: 'No session for this date' });
-    res.json({ ok: true, session: rows[0] });
+      `UPDATE daily_sessions SET status=$1, paid_at=NOW(), paid_by=$2 WHERE id=$3 RETURNING *`,
+      [newStatus, req.user.member_id, sess.id]);
+
+    res.json({ ok: true, session: rows[0], amountPaid: money.amountPaid, pending: money.pending });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: reopen a paid session
+// Admin: undo a specific payment (mistaken entry)
+app.delete('/api/tab/payments/:id', auth, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM session_payments WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Payment not found' });
+    const sessionId = rows[0].session_id;
+    await pool.query('DELETE FROM session_payments WHERE id=$1', [req.params.id]);
+
+    const money = await getSessionMoney(sessionId);
+    const newStatus = money.amountPaid <= 0 ? 'open' : (money.pending <= 0.01 ? 'paid' : 'partial');
+    await pool.query('UPDATE daily_sessions SET status=$1 WHERE id=$2', [newStatus, sessionId]);
+    res.json({ ok: true, amountPaid: money.amountPaid, pending: money.pending });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: reopen a paid/partial session so items can be added/removed again
 app.post('/api/tab/reopen', auth, adminOnly, async (req, res) => {
   try {
     const date = req.body.date || new Date().toISOString().split('T')[0];
-    await pool.query(`UPDATE daily_sessions SET status='open', paid_at=NULL, paid_by=NULL WHERE date=$1`, [date]);
+    await pool.query(`UPDATE daily_sessions SET status='open' WHERE date=$1`, [date]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -299,9 +353,17 @@ app.post('/api/tab/reopen', auth, adminOnly, async (req, res) => {
 app.get('/api/sessions', auth, adminOnly, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT ds.*, COALESCE(SUM(te.amount),0) as total, COUNT(DISTINCT te.member_id) as member_count
-       FROM daily_sessions ds LEFT JOIN tab_entries te ON te.session_id=ds.id
-       GROUP BY ds.id ORDER BY ds.date DESC LIMIT 30`);
+      `SELECT ds.*,
+              COALESCE(te.total,0)        as total,
+              COALESCE(te.member_count,0) as member_count,
+              COALESCE(sp.amount_paid,0)  as amount_paid,
+              GREATEST(COALESCE(te.total,0) - COALESCE(sp.amount_paid,0), 0) as pending
+       FROM daily_sessions ds
+       LEFT JOIN (SELECT session_id, SUM(amount) as total, COUNT(DISTINCT member_id) as member_count
+                  FROM tab_entries GROUP BY session_id) te ON te.session_id = ds.id
+       LEFT JOIN (SELECT session_id, SUM(amount) as amount_paid
+                  FROM session_payments GROUP BY session_id) sp ON sp.session_id = ds.id
+       ORDER BY ds.date DESC LIMIT 30`);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
