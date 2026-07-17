@@ -240,6 +240,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="nav" id="memberNav">
     <button class="nav-btn active" onclick="showPage('addItems')">➕ Add Items</button>
     <button class="nav-btn" onclick="showPage('myTab')">🧾 My Tab</button>
+    <button class="nav-btn" onclick="showPage('liveBoard')">💰 Pay Shop</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
   </div>
 
@@ -730,7 +731,7 @@ async function loadLiveBoard() {
         <h2>✅ Session Paid & Closed</h2>
         <div class="pay-banner-total">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div>
         <div style="font-size:.83rem;opacity:.8;">Paid on ${fmtDate(session.paid_at?.substring(0,10))} at ${fmtTime(session.paid_at)}</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:10px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>
+        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:10px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>`:''}
       </div>`;
     } else if (isPartial) {
       pay.innerHTML = `<div class="pay-banner partial" style="margin-bottom:12px;">
@@ -740,7 +741,7 @@ async function loadLiveBoard() {
         <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal('${date}')">
           🧾 View Bill &amp; Pay Remaining
         </button>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>
+        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>`:''}
       </div>`;
     } else if (grandTotal > 0) {
       pay.innerHTML = `<div class="pay-banner" style="margin-bottom:12px;">
@@ -829,14 +830,17 @@ async function openBillModal(date) {
       .join('');
 
     // Payment history (partial payments already made)
-    const payRows = (payments||[]).map(p=>`
+    const payRows = (payments||[]).map(p=>{
+      const canUndo = currentUser.isAdmin || p.paid_by === currentUser.memberId;
+      return `
       <div class="pay-hist-row">
         <span>${fmtDate(p.paid_at.substring(0,10))} ${fmtTime(p.paid_at)} · ${p.paid_by_name||'—'}</span>
         <span class="flex gap-8" style="align-items:center;">
           <span class="bold">₹${parseFloat(p.amount).toLocaleString('en-IN')}</span>
-          <button class="btn btn-ghost btn-sm" style="padding:2px 8px;" onclick="undoPayment(${p.id})">✕</button>
+          ${canUndo?`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;" onclick="undoPayment(${p.id})">✕</button>`:''}
         </span>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     const payHistoryHtml = payments && payments.length ? `
       <div class="section-label" style="margin-top:14px;">Payments so far</div>
       ${payRows}` : '';
