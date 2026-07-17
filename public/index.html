@@ -284,8 +284,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="page" id="page-myTab">
     <div class="card">
       <div class="card-title flex-between">
-        <span>🧾 My Tab Today</span>
-        <input type="date" class="form-input" id="myTabDate" style="width:auto;padding:5px 10px;font-size:.82rem;">
+        <span>🧾 My Tab</span>
+        <div class="flex gap-8">
+          <input type="date" class="form-input" id="myTabDate" style="width:auto;padding:5px 10px;font-size:.82rem;" onchange="loadMyTab()">
+          <select class="form-input" id="myTabRoundSel" style="width:auto;padding:5px 10px;font-size:.82rem;" onchange="loadMyTab()"></select>
+        </div>
       </div>
       <div id="myTabContent"></div>
     </div>
@@ -296,7 +299,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 
     <div id="liveBoardDate" class="flex-between" style="margin-bottom:10px;">
       <div class="flex gap-8" style="align-items:center;">
-        <input type="date" class="form-input" id="boardDate" style="width:auto;padding:6px 10px;font-size:.82rem;">
+        <input type="date" class="form-input" id="boardDate" style="width:auto;padding:6px 10px;font-size:.82rem;" onchange="loadLiveBoard()">
+        <select class="form-input" id="boardRoundSel" style="width:auto;padding:6px 10px;font-size:.82rem;" onchange="loadLiveBoard()"></select>
         <button class="btn btn-ghost btn-sm" onclick="loadLiveBoard()">↺ Refresh</button>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="setToday()">Today</button>
@@ -401,7 +405,8 @@ let allItems    = [];
 let addQtys     = {};  // { item_id: qty } for current selection
 let pinBuffer   = '';
 let editingMemberId = null;
-let pendingPayDate  = null;
+let pendingPaySessionId = null;
+let preselectSessionId  = null; // set by History to jump straight to a specific round
 
 // ════════════════════════════════════════════════════════
 // API
@@ -582,15 +587,17 @@ async function loadSessionStatus() {
   try {
     const sess = await api('GET',`/api/session/today?date=${date}`);
     const banner = document.getElementById('sessionStatusBanner');
-    if (sess.status === 'paid') {
-      banner.innerHTML = `<div style="background:#d4edda;border-radius:8px;padding:10px 14px;color:#155724;font-size:.85rem;font-weight:600;">
-        ✅ This session is closed & paid. No new items can be added.</div>`;
-      document.getElementById('addBtn').disabled = true;
+    if (sess.status === 'open') {
+      banner.innerHTML = `<div style="background:#fff3cd;border-radius:8px;padding:8px 14px;color:#856404;font-size:.82rem;">
+        🟡 Round ${sess.round_no} open — add items anytime</div>`;
+    } else if (sess.lastRound) {
+      banner.innerHTML = `<div style="background:#ffe0b2;border-radius:8px;padding:8px 14px;color:#8a4b00;font-size:.82rem;">
+        🟠 Round ${sess.lastRound.round_no} is settled — adding an item will start Round ${sess.round_no}</div>`;
     } else {
       banner.innerHTML = `<div style="background:#fff3cd;border-radius:8px;padding:8px 14px;color:#856404;font-size:.82rem;">
-        🟡 Session open — add items anytime</div>`;
-      document.getElementById('addBtn').disabled = false;
+        🟡 Add your first item to start today's tab</div>`;
     }
+    document.getElementById('addBtn').disabled = false;
   } catch(e) {}
 }
 
@@ -656,8 +663,41 @@ async function submitItems() {
     // Reset
     addQtys = {};
     renderQuickGrid();
+    loadSessionStatus();
     toast('✅ Added!');
   } catch(e) { toast('Error: '+e.message); }
+}
+
+// ════════════════════════════════════════════════════════
+// ROUND SELECTOR (shared by My Tab & Live Board — multiple sessions/day)
+// ════════════════════════════════════════════════════════
+async function populateRoundSelect(selectId, date) {
+  const sel = document.getElementById(selectId);
+  const prevValue = sel.value;
+  let rounds = [];
+  try { rounds = await api('GET', `/api/sessions/by-date?date=${date}`); } catch(e) { rounds = []; }
+
+  if (!rounds.length) {
+    sel.innerHTML = `<option value="">Round 1 (new)</option>`;
+    return { sessionId: '', rounds: [] };
+  }
+
+  sel.innerHTML = rounds.map(r => {
+    const tag = r.status === 'open' ? '🟡 open' : (r.status === 'partial' ? '🟠 partial' : '✅ paid');
+    return `<option value="${r.id}">Round ${r.round_no} — ${tag}${r.grandTotal ? ' · ₹'+parseFloat(r.grandTotal).toLocaleString('en-IN') : ''}</option>`;
+  }).join('');
+
+  // Prefer an explicit preselect (from History), then the previous selection,
+  // then the open round, then the latest round
+  let target;
+  if (preselectSessionId) {
+    target = rounds.find(r => String(r.id) === String(preselectSessionId));
+    preselectSessionId = null;
+  }
+  if (!target) target = rounds.find(r => String(r.id) === String(prevValue));
+  if (!target) target = rounds.find(r => r.status === 'open') || rounds[rounds.length - 1];
+  sel.value = target.id;
+  return { sessionId: target.id, rounds };
 }
 
 // ════════════════════════════════════════════════════════
@@ -668,9 +708,11 @@ async function loadMyTab() {
   const cont = document.getElementById('myTabContent');
   cont.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   try {
-    const { session, entries, total } = await api('GET',`/api/tab/mine?date=${date}`);
-    if (!entries.length) {
-      cont.innerHTML = '<div class="empty-state"><div class="icon">🫙</div><p>Nothing added yet today</p></div>';
+    const { sessionId } = await populateRoundSelect('myTabRoundSel', date);
+    const q = sessionId ? `session_id=${sessionId}` : `date=${date}`;
+    const { session, entries, total } = await api('GET',`/api/tab/mine?${q}`);
+    if (!session || !entries.length) {
+      cont.innerHTML = '<div class="empty-state"><div class="icon">🫙</div><p>Nothing added yet this round</p></div>';
       return;
     }
     const canDelete = session.status === 'open';
@@ -686,11 +728,11 @@ async function loadMyTab() {
         </div>`).join('')}
       <div class="divider"></div>
       <div class="flex-between">
-        <span class="bold">My Total Today</span>
+        <span class="bold">My Total (Round ${session.round_no})</span>
         <span class="grand-total-lbl">₹${total.toLocaleString('en-IN')}</span>
       </div>
       ${session.status==='paid'?`<div style="margin-top:8px;"><span class="badge badge-paid">✅ Paid by admin at ${fmtTime(session.paid_at)}</span></div>`:''}
-      ${session.status==='partial'?`<div style="margin-top:8px;"><span class="badge badge-partial">🟠 Admin has started paying — tab locked</span></div>`:''}`;
+      ${session.status==='partial'?`<div style="margin-top:8px;"><span class="badge badge-partial">🟠 Admin has started paying — round locked</span></div>`:''}`;
   } catch(e) { cont.innerHTML = `<div class="empty-state"><p>${e.message}</p></div>`; }
 }
 
@@ -720,35 +762,43 @@ async function loadLiveBoard() {
   pay.innerHTML   = '';
 
   try {
-    const { session, byMember, itemSummary, grandTotal, entryCount, payments, amountPaid, pending } = await api('GET',`/api/tab/all?date=${date}`);
+    const { sessionId } = await populateRoundSelect('boardRoundSel', date);
+    const q = sessionId ? `session_id=${sessionId}` : `date=${date}`;
+    const { session, byMember, itemSummary, grandTotal, entryCount, payments, amountPaid, pending } = await api('GET',`/api/tab/all?${q}`);
+    if (!session) {
+      cont.innerHTML = '<div class="empty-state"><div class="icon">☕</div><p>No round yet for this date. It will start once someone adds an item.</p></div>';
+      stats.innerHTML = '';
+      return;
+    }
     const memberCount = Object.keys(byMember).length;
     const isPaid    = session.status === 'paid';
     const isPartial = session.status === 'partial';
+    const sid = session.id;
 
     // Pay banner
     if (isPaid) {
       pay.innerHTML = `<div class="pay-banner paid" style="margin-bottom:12px;">
-        <h2>✅ Session Paid & Closed</h2>
+        <h2>✅ Round ${session.round_no} Paid & Closed</h2>
         <div class="pay-banner-total">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div>
         <div style="font-size:.83rem;opacity:.8;">Paid on ${fmtDate(session.paid_at?.substring(0,10))} at ${fmtTime(session.paid_at)}</div>
-        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:10px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>`:''}
+        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:10px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession(${sid})">↩️ Reopen This Round</button>`:''}
       </div>`;
     } else if (isPartial) {
       pay.innerHTML = `<div class="pay-banner partial" style="margin-bottom:12px;">
-        <h2>🟠 Partially Paid</h2>
+        <h2>🟠 Round ${session.round_no} — Partially Paid</h2>
         <div class="pay-banner-total">₹${pending.toLocaleString('en-IN')} <span style="font-size:.9rem;font-weight:400;opacity:.85;">pending</span></div>
         <div style="font-size:.83rem;opacity:.85;">₹${amountPaid.toLocaleString('en-IN')} paid of ₹${parseFloat(grandTotal).toLocaleString('en-IN')} bill</div>
-        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal('${date}')">
+        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal(${sid})">
           🧾 View Bill &amp; Pay Remaining
         </button>
-        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>`:''}
+        ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession(${sid})">↩️ Reopen This Round</button>`:''}
       </div>`;
     } else if (grandTotal > 0) {
       pay.innerHTML = `<div class="pay-banner" style="margin-bottom:12px;">
-        <h2>☕ Today's Running Tab</h2>
+        <h2>☕ Round ${session.round_no} — Running Tab</h2>
         <div class="pay-banner-total">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div>
         <div style="font-size:.83rem;opacity:.8;">${entryCount} item(s) · ${memberCount} member(s)</div>
-        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal('${date}')">
+        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal(${sid})">
           🧾 View Bill &amp; Pay Coffee Shop
         </button>
       </div>`;
@@ -758,13 +808,13 @@ async function loadLiveBoard() {
     const statusLabel = isPaid ? 'Paid' : (isPartial ? 'Partial' : 'Open');
     const statusClass  = isPaid ? 'paid' : (isPartial ? 'partial' : 'open');
     stats.innerHTML = `
-      <div class="stat-card sc1"><div class="stat-num">${memberCount}</div><div class="stat-lbl">👥 Members today</div></div>
-      <div class="stat-card sc2"><div class="stat-num">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div><div class="stat-lbl">💰 Total tab</div></div>
+      <div class="stat-card sc1"><div class="stat-num">${memberCount}</div><div class="stat-lbl">👥 Members (Round ${session.round_no})</div></div>
+      <div class="stat-card sc2"><div class="stat-num">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div><div class="stat-lbl">💰 Round total</div></div>
       <div class="stat-card sc3"><div class="stat-num">${entryCount}</div><div class="stat-lbl">📋 Items added</div></div>
       <div class="stat-card sc4"><div class="stat-num"><span class="badge badge-${statusClass}" style="font-size:.9rem;">${statusLabel}</span></div><div class="stat-lbl">📅 Status</div></div>`;
 
     if (!memberCount) {
-      cont.innerHTML = '<div class="empty-state"><div class="icon">☕</div><p>No items added yet today. Members will appear here as they add items.</p></div>';
+      cont.innerHTML = '<div class="empty-state"><div class="icon">☕</div><p>No items added yet this round. Members will appear here as they add items.</p></div>';
       return;
     }
 
@@ -803,14 +853,14 @@ async function loadLiveBoard() {
 // ════════════════════════════════════════════════════════
 let pendingBillAmount = 0; // current pending balance for the open bill modal
 
-async function openBillModal(date) {
-  pendingPayDate = date;
+async function openBillModal(sessionId) {
+  pendingPaySessionId = sessionId;
   openModal('billModal');
   document.getElementById('billModalBody').innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   document.getElementById('payAmountInput').value = '';
 
   try {
-    const { byMember, itemSummary, grandTotal, payments, amountPaid, pending } = await api('GET',`/api/tab/all?date=${date}`);
+    const { session, byMember, itemSummary, grandTotal, payments, amountPaid, pending } = await api('GET',`/api/tab/all?session_id=${sessionId}`);
     pendingBillAmount = pending;
 
     // Item summary for coffee shop
@@ -846,7 +896,7 @@ async function openBillModal(date) {
       ${payRows}` : '';
 
     document.getElementById('billModalBody').innerHTML = `
-      <p style="font-size:.83rem;color:var(--mocha);margin-bottom:12px;">📅 ${fmtDate(date)}</p>
+      <p style="font-size:.83rem;color:var(--mocha);margin-bottom:12px;">📅 ${fmtDate(String(session.date).substring(0,10))} · Round ${session.round_no}</p>
       <div class="section-label">Coffee Shop Bill (Items)</div>
       <table class="bill-table" style="margin-bottom:14px;">
         <thead><tr><th>Item</th><th style="text-align:center;">Qty</th><th>Rate</th><th>Amount</th></tr></thead>
@@ -880,15 +930,15 @@ function fillPayAmount(which) {
 }
 
 async function payNow() {
-  if (!pendingPayDate) return;
+  if (!pendingPaySessionId) return;
   const raw = document.getElementById('payAmountInput').value;
   const amount = raw === '' ? undefined : parseFloat(raw);
   if (amount !== undefined && (isNaN(amount) || amount <= 0)) { toast('Enter a valid amount'); return; }
   try {
-    const res = await api('POST','/api/tab/pay',{date:pendingPayDate, amount});
+    const res = await api('POST','/api/tab/pay',{session_id:pendingPaySessionId, amount});
     closeModal('billModal');
     if (res.pending > 0) toast(`💰 ₹${res.amountPaid.toLocaleString('en-IN')} paid · ₹${res.pending.toLocaleString('en-IN')} still pending`);
-    else toast('💰 Paid in full! Session closed.');
+    else toast('💰 Paid in full! Round closed — a new round starts automatically on the next item.');
     loadLiveBoard();
   } catch(e) { toast('Error: '+e.message); }
 }
@@ -898,17 +948,19 @@ async function undoPayment(paymentId) {
     try {
       await api('DELETE',`/api/tab/payments/${paymentId}`);
       toast('Payment removed');
-      openBillModal(pendingPayDate);
+      openBillModal(pendingPaySessionId);
       loadLiveBoard();
     } catch(e) { toast('Error: '+e.message); }
   },'Remove','btn-danger');
 }
 
-async function reopenSession(date) {
-  confirm('Reopen Session','Allow new items to be added to this session?', async ()=>{
-    await api('POST','/api/tab/reopen',{date});
-    toast('Session reopened');
-    loadLiveBoard();
+async function reopenSession(sessionId) {
+  confirm('Reopen Round','Allow new items to be added to this round again?', async ()=>{
+    try {
+      await api('POST','/api/tab/reopen',{session_id:sessionId});
+      toast('Round reopened');
+      loadLiveBoard();
+    } catch(e) { toast('Error: '+e.message); }
   },'Reopen','btn-primary');
 }
 
@@ -1028,10 +1080,10 @@ async function loadHistory() {
     const rows=await api('GET','/api/sessions');
     if (!rows.length) { list.innerHTML='<div class="empty-state"><div class="icon">📭</div><p>No sessions yet</p></div>'; return; }
     list.innerHTML=rows.map(s=>`
-      <div class="hist-item ${s.status}" onclick="viewHistorySession('${String(s.date).substring(0,10)}')">
+      <div class="hist-item ${s.status}" onclick="viewHistorySession('${String(s.date).substring(0,10)}', ${s.id})">
         <div class="flex-between">
           <div>
-            <div class="hist-date">${fmtDate(String(s.date).substring(0,10))}</div>
+            <div class="hist-date">${fmtDate(String(s.date).substring(0,10))} ${s.round_no>1?`· Round ${s.round_no}`:''}</div>
             <div class="hist-meta">${s.member_count} member(s) · <span class="badge badge-${s.status}">${s.status}</span>${s.status==='partial'?` · ₹${parseFloat(s.pending).toLocaleString('en-IN')} pending`:''}</div>
           </div>
           <div class="hist-amt">₹${parseFloat(s.total).toLocaleString('en-IN')}</div>
@@ -1040,7 +1092,8 @@ async function loadHistory() {
   } catch(e) { list.innerHTML=`<p style="color:var(--danger);">${e.message}</p>`; }
 }
 
-function viewHistorySession(date) {
+function viewHistorySession(date, sessionId) {
+  preselectSessionId = sessionId;
   if (currentUser && currentUser.isAdmin) {
     document.getElementById('boardDate').value = date;
     showPage('liveBoard');
