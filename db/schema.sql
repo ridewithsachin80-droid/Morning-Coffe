@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS daily_sessions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Payments recorded against a daily session (supports partial/split payments)
+CREATE TABLE IF NOT EXISTS session_payments (
+  id          SERIAL PRIMARY KEY,
+  session_id  INT NOT NULL REFERENCES daily_sessions(id) ON DELETE CASCADE,
+  amount      NUMERIC(10,2) NOT NULL CHECK (amount > 0),
+  paid_by     INT REFERENCES members(id),
+  note        VARCHAR(200),
+  paid_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id         VARCHAR(64) PRIMARY KEY,
   member_id  INT NOT NULL REFERENCES members(id),
@@ -54,6 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_tab_session   ON tab_entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_tab_member    ON tab_entries(member_id);
 CREATE INDEX IF NOT EXISTS idx_tab_added     ON tab_entries(added_at);
 CREATE INDEX IF NOT EXISTS idx_session_date  ON daily_sessions(date);
+CREATE INDEX IF NOT EXISTS idx_payments_session ON session_payments(session_id);
 
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
