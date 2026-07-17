@@ -166,15 +166,50 @@ app.delete('/api/members/:id', auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ── SESSION (daily) ──
-// Get or create today's session
-async function getOrCreateSession(date) {
-  const d = date || new Date().toISOString().split('T')[0];
-  const { rows } = await pool.query('SELECT * FROM daily_sessions WHERE date=$1', [d]);
-  if (rows.length) return rows[0];
-  const { rows: nr } = await pool.query(
-    'INSERT INTO daily_sessions (date) VALUES ($1) ON CONFLICT (date) DO UPDATE SET date=EXCLUDED.date RETURNING *', [d]);
-  return nr[0];
+// ── SESSION (daily, supports multiple rounds per date) ──
+
+// Read-only: the currently open round for a date, if any
+async function getOpenSession(date) {
+  const { rows } = await pool.query(
+    `SELECT * FROM daily_sessions WHERE date=$1 AND status='open' ORDER BY round_no DESC LIMIT 1`, [date]);
+  return rows[0] || null;
+}
+
+// Read-only: every round recorded for a date, oldest first
+async function listSessionsForDate(date) {
+  const { rows } = await pool.query(
+    `SELECT * FROM daily_sessions WHERE date=$1 ORDER BY round_no`, [date]);
+  return rows;
+}
+
+// Read-only: a specific round by id
+async function getSessionById(id) {
+  const { rows } = await pool.query('SELECT * FROM daily_sessions WHERE id=$1', [id]);
+  return rows[0] || null;
+}
+
+// The only place a new round gets created: when someone actually adds an item.
+// Reuses the open round for the date if one exists, otherwise starts the next round.
+async function getOrCreateOpenSession(date) {
+  const open = await getOpenSession(date);
+  if (open) return open;
+  const { rows: mx } = await pool.query(
+    'SELECT COALESCE(MAX(round_no),0) as m FROM daily_sessions WHERE date=$1', [date]);
+  const { rows } = await pool.query(
+    'INSERT INTO daily_sessions (date, round_no) VALUES ($1,$2) RETURNING *',
+    [date, mx[0].m + 1]);
+  return rows[0];
+}
+
+// Resolve "which session are we talking about" from a request: prefer an explicit
+// session_id, fall back to the open round for the date, fall back to the latest round.
+async function resolveSession(query) {
+  if (query.session_id) return getSessionById(query.session_id);
+  const date = query.date || new Date().toISOString().split('T')[0];
+  const open = await getOpenSession(date);
+  if (open) return open;
+  const all = await listSessionsForDate(date);
+  return all.length ? all[all.length - 1] : null;
 }
 
 // Compute grand total, amount paid so far, and pending balance for a session
@@ -189,22 +224,39 @@ async function getSessionMoney(sessionId) {
   return { grandTotal, amountPaid, pending };
 }
 
+// Read-only status check for the "Add Items" banner — never creates a round
 app.get('/api/session/today', auth, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
-    const sess = await getOrCreateSession(date);
-    res.json(sess);
+    const open = await getOpenSession(date);
+    if (open) return res.json(open);
+    const all = await listSessionsForDate(date);
+    res.json({ status: 'none', round_no: all.length + 1, date, lastRound: all[all.length - 1] || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List every round recorded for a date, with totals — powers the round picker in the UI
+app.get('/api/sessions/by-date', auth, async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const sessions = await listSessionsForDate(date);
+    const withMoney = await Promise.all(sessions.map(async s => {
+      const money = await getSessionMoney(s.id);
+      return { ...s, ...money };
+    }));
+    res.json(withMoney);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── TAB ENTRIES ──
 
-// Member adds item(s) — can call multiple times
+// Member adds item(s) — can call multiple times. Always lands in the open round
+// for that date; if the latest round there is locked (payment started), a new
+// round is started automatically.
 app.post('/api/tab', auth, async (req, res) => {
   try {
     const date  = req.body.date || new Date().toISOString().split('T')[0];
-    const sess  = await getOrCreateSession(date);
-    if (sess.status !== 'open') return res.status(400).json({ error: 'Session is locked — payment already started. Ask admin to reopen it.' });
+    const sess  = await getOrCreateOpenSession(date);
 
     const entries = req.body.entries; // [{ item_id, qty }]
     if (!entries || !entries.length) return res.status(400).json({ error: 'No items provided' });
@@ -220,7 +272,7 @@ app.post('/api/tab', auth, async (req, res) => {
         [sess.id, req.user.member_id, e.item_id, item[0].name, item[0].rate, e.qty]);
       inserted.push(rows[0]);
     }
-    res.json({ ok: true, entries: inserted });
+    res.json({ ok: true, entries: inserted, session: sess });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -239,11 +291,11 @@ app.delete('/api/tab/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Member: get my tab for a date
+// Member: get my tab for a date/round
 app.get('/api/tab/mine', auth, async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
-    const sess = await getOrCreateSession(date);
+    const sess = await resolveSession(req.query);
+    if (!sess) return res.json({ session: null, entries: [], total: 0 });
     const { rows } = await pool.query(
       `SELECT te.* FROM tab_entries te WHERE te.session_id=$1 AND te.member_id=$2 ORDER BY te.added_at`,
       [sess.id, req.user.member_id]);
@@ -252,11 +304,11 @@ app.get('/api/tab/mine', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Everyone: get full tab for a date (all members) — needed so anyone can view & pay the bill
+// Everyone: get full tab for a date/round (all members) — needed so anyone can view & pay the bill
 app.get('/api/tab/all', auth, async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
-    const sess = await getOrCreateSession(date);
+    const sess = await resolveSession(req.query);
+    if (!sess) return res.json({ session: null, byMember: {}, itemSummary: {}, grandTotal: 0, entryCount: 0, payments: [], amountPaid: 0, pending: 0 });
 
     const { rows: entries } = await pool.query(
       `SELECT te.*, m.name as member_name
@@ -297,9 +349,9 @@ app.get('/api/tab/all', auth, async (req, res) => {
 // Any member: record a payment against a session (full or partial)
 app.post('/api/tab/pay', auth, async (req, res) => {
   try {
-    const date = req.body.date || new Date().toISOString().split('T')[0];
-    const sess = await getOrCreateSession(date);
-    if (sess.status === 'paid') return res.status(400).json({ error: 'Session already fully paid' });
+    const sess = await resolveSession(req.body);
+    if (!sess) return res.status(404).json({ error: 'No session found to pay' });
+    if (sess.status === 'paid') return res.status(400).json({ error: 'This round is already fully paid' });
 
     const { grandTotal, pending } = await getSessionMoney(sess.id);
     if (grandTotal <= 0) return res.status(400).json({ error: 'Nothing to pay yet' });
@@ -342,11 +394,17 @@ app.delete('/api/tab/payments/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: reopen a paid/partial session so items can be added/removed again
+// Admin: reopen a paid/partial round so items can be added/removed again.
+// Only the latest round for a date can be reopened — keeps "one open round per date" simple.
 app.post('/api/tab/reopen', auth, adminOnly, async (req, res) => {
   try {
-    const date = req.body.date || new Date().toISOString().split('T')[0];
-    await pool.query(`UPDATE daily_sessions SET status='open' WHERE date=$1`, [date]);
+    const sess = await resolveSession(req.body);
+    if (!sess) return res.status(404).json({ error: 'No session found to reopen' });
+    const dateStr = sess.date instanceof Date ? sess.date.toISOString().split('T')[0] : String(sess.date).substring(0, 10);
+    const all = await listSessionsForDate(dateStr);
+    const latest = all[all.length - 1];
+    if (latest.id !== sess.id) return res.status(400).json({ error: 'A newer round already exists for this date — only the latest round can be reopened' });
+    await pool.query(`UPDATE daily_sessions SET status='open' WHERE id=$1`, [sess.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -365,7 +423,7 @@ app.get('/api/sessions', auth, async (req, res) => {
                   FROM tab_entries GROUP BY session_id) te ON te.session_id = ds.id
        LEFT JOIN (SELECT session_id, SUM(amount) as amount_paid
                   FROM session_payments GROUP BY session_id) sp ON sp.session_id = ds.id
-       ORDER BY ds.date DESC LIMIT 30`);
+       ORDER BY ds.date DESC, ds.round_no DESC LIMIT 30`);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
