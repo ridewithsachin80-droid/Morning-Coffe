@@ -349,8 +349,8 @@ app.post('/api/tab/reopen', auth, adminOnly, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admin: history of past sessions
-app.get('/api/sessions', auth, adminOnly, async (req, res) => {
+// Everyone: history of past sessions (aggregate totals only, no per-member breakdown)
+app.get('/api/sessions', auth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT ds.*,
