@@ -123,6 +123,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 .pay-banner h2{font-family:'Playfair Display',serif;color:#a8e6c0;margin-bottom:4px;font-size:1.2rem;}
 .pay-banner-total{font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;margin:8px 0;}
 .pay-banner.paid{background:linear-gradient(135deg,#4a4a4a,#2a2a2a);}
+.pay-banner.partial{background:linear-gradient(135deg,#c9860b,#8a5b00);}
+.pay-row{display:flex;justify-content:space-between;font-size:.82rem;padding:4px 0;}
+.pay-hist-row{display:flex;justify-content:space-between;align-items:center;font-size:.8rem;padding:6px 0;border-bottom:1px dashed rgba(0,0,0,.08);}
 
 /* BILL TABLE */
 .bill-table{width:100%;border-collapse:collapse;font-size:.84rem;}
@@ -135,6 +138,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 /* HISTORY */
 .hist-item{padding:12px 14px;background:var(--milk);border-radius:10px;margin-bottom:8px;border-left:4px solid var(--caramel);cursor:pointer;}
 .hist-item.paid{border-left-color:var(--success);}
+.hist-item.partial{border-left-color:#c9860b;}
 .hist-date{font-weight:700;font-size:.9rem;}
 .hist-meta{font-size:.75rem;color:var(--mocha);margin-top:2px;}
 .hist-amt{font-family:'Playfair Display',serif;color:var(--caramel);font-size:1.1rem;font-weight:700;}
@@ -143,6 +147,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.71rem;font-weight:600;}
 .badge-open{background:#fff3cd;color:#856404;}
 .badge-paid{background:#d4edda;color:#155724;}
+.badge-partial{background:#ffe0b2;color:#8a4b00;}
 
 /* MODAL */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(26,10,2,.75);z-index:200;align-items:center;justify-content:center;padding:20px;}
@@ -366,6 +371,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="modal" style="max-width:520px;">
     <div class="modal-title">🧾 Bill for Coffee Shop</div>
     <div id="billModalBody"></div>
+    <div class="form-group" id="payAmountGroup" style="margin-top:10px;">
+      <label class="form-label">Amount to pay now</label>
+      <input type="number" class="form-input" id="payAmountInput" min="0" step="0.01" placeholder="0.00">
+      <div class="flex gap-8" style="margin-top:6px;">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="fillPayAmount('half')">½ pending</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="fillPayAmount('full')">Full pending</button>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('billModal')">Close</button>
       <button class="btn btn-success" id="payNowBtn" onclick="payNow()">💰 Confirm Payment</button>
@@ -658,7 +671,7 @@ async function loadMyTab() {
       cont.innerHTML = '<div class="empty-state"><div class="icon">🫙</div><p>Nothing added yet today</p></div>';
       return;
     }
-    const canDelete = session.status !== 'paid';
+    const canDelete = session.status === 'open';
     cont.innerHTML = `
       ${entries.map(e=>`
         <div class="tab-entry" id="entry-${e.id}">
@@ -674,7 +687,8 @@ async function loadMyTab() {
         <span class="bold">My Total Today</span>
         <span class="grand-total-lbl">₹${total.toLocaleString('en-IN')}</span>
       </div>
-      ${session.status==='paid'?`<div style="margin-top:8px;"><span class="badge badge-paid">✅ Paid by admin at ${fmtTime(session.paid_at)}</span></div>`:''}`;
+      ${session.status==='paid'?`<div style="margin-top:8px;"><span class="badge badge-paid">✅ Paid by admin at ${fmtTime(session.paid_at)}</span></div>`:''}
+      ${session.status==='partial'?`<div style="margin-top:8px;"><span class="badge badge-partial">🟠 Admin has started paying — tab locked</span></div>`:''}`;
   } catch(e) { cont.innerHTML = `<div class="empty-state"><p>${e.message}</p></div>`; }
 }
 
@@ -704,9 +718,10 @@ async function loadLiveBoard() {
   pay.innerHTML   = '';
 
   try {
-    const { session, byMember, itemSummary, grandTotal, entryCount } = await api('GET',`/api/tab/all?date=${date}`);
+    const { session, byMember, itemSummary, grandTotal, entryCount, payments, amountPaid, pending } = await api('GET',`/api/tab/all?date=${date}`);
     const memberCount = Object.keys(byMember).length;
-    const isPaid = session.status === 'paid';
+    const isPaid    = session.status === 'paid';
+    const isPartial = session.status === 'partial';
 
     // Pay banner
     if (isPaid) {
@@ -715,6 +730,16 @@ async function loadLiveBoard() {
         <div class="pay-banner-total">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div>
         <div style="font-size:.83rem;opacity:.8;">Paid on ${fmtDate(session.paid_at?.substring(0,10))} at ${fmtTime(session.paid_at)}</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:10px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>
+      </div>`;
+    } else if (isPartial) {
+      pay.innerHTML = `<div class="pay-banner partial" style="margin-bottom:12px;">
+        <h2>🟠 Partially Paid</h2>
+        <div class="pay-banner-total">₹${pending.toLocaleString('en-IN')} <span style="font-size:.9rem;font-weight:400;opacity:.85;">pending</span></div>
+        <div style="font-size:.83rem;opacity:.85;">₹${amountPaid.toLocaleString('en-IN')} paid of ₹${parseFloat(grandTotal).toLocaleString('en-IN')} bill</div>
+        <button class="btn btn-success" style="margin-top:12px;width:100%;justify-content:center;font-size:.95rem;padding:12px;" onclick="openBillModal('${date}')">
+          🧾 View Bill &amp; Pay Remaining
+        </button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.3);" onclick="reopenSession('${date}')">↩️ Reopen Session</button>
       </div>`;
     } else if (grandTotal > 0) {
       pay.innerHTML = `<div class="pay-banner" style="margin-bottom:12px;">
@@ -728,11 +753,13 @@ async function loadLiveBoard() {
     }
 
     // Stats
+    const statusLabel = isPaid ? 'Paid' : (isPartial ? 'Partial' : 'Open');
+    const statusClass  = isPaid ? 'paid' : (isPartial ? 'partial' : 'open');
     stats.innerHTML = `
       <div class="stat-card sc1"><div class="stat-num">${memberCount}</div><div class="stat-lbl">👥 Members today</div></div>
       <div class="stat-card sc2"><div class="stat-num">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</div><div class="stat-lbl">💰 Total tab</div></div>
       <div class="stat-card sc3"><div class="stat-num">${entryCount}</div><div class="stat-lbl">📋 Items added</div></div>
-      <div class="stat-card sc4"><div class="stat-num"><span class="badge badge-${isPaid?'paid':'open'}" style="font-size:.9rem;">${isPaid?'Paid':'Open'}</span></div><div class="stat-lbl">📅 Status</div></div>`;
+      <div class="stat-card sc4"><div class="stat-num"><span class="badge badge-${statusClass}" style="font-size:.9rem;">${statusLabel}</span></div><div class="stat-lbl">📅 Status</div></div>`;
 
     if (!memberCount) {
       cont.innerHTML = '<div class="empty-state"><div class="icon">☕</div><p>No items added yet today. Members will appear here as they add items.</p></div>';
@@ -772,13 +799,17 @@ async function loadLiveBoard() {
 // ════════════════════════════════════════════════════════
 // BILL MODAL & PAY
 // ════════════════════════════════════════════════════════
+let pendingBillAmount = 0; // current pending balance for the open bill modal
+
 async function openBillModal(date) {
   pendingPayDate = date;
   openModal('billModal');
   document.getElementById('billModalBody').innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  document.getElementById('payAmountInput').value = '';
 
   try {
-    const { byMember, itemSummary, grandTotal } = await api('GET',`/api/tab/all?date=${date}`);
+    const { byMember, itemSummary, grandTotal, payments, amountPaid, pending } = await api('GET',`/api/tab/all?date=${date}`);
+    pendingBillAmount = pending;
 
     // Item summary for coffee shop
     const itemRows = Object.entries(itemSummary)
@@ -796,6 +827,19 @@ async function openBillModal(date) {
       .map(([name,d])=>`<tr><td>${name}</td><td colspan="2"></td><td>₹${d.total.toLocaleString('en-IN')}</td></tr>`)
       .join('');
 
+    // Payment history (partial payments already made)
+    const payRows = (payments||[]).map(p=>`
+      <div class="pay-hist-row">
+        <span>${fmtDate(p.paid_at.substring(0,10))} ${fmtTime(p.paid_at)} · ${p.paid_by_name||'—'}</span>
+        <span class="flex gap-8" style="align-items:center;">
+          <span class="bold">₹${parseFloat(p.amount).toLocaleString('en-IN')}</span>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 8px;" onclick="undoPayment(${p.id})">✕</button>
+        </span>
+      </div>`).join('');
+    const payHistoryHtml = payments && payments.length ? `
+      <div class="section-label" style="margin-top:14px;">Payments so far</div>
+      ${payRows}` : '';
+
     document.getElementById('billModalBody').innerHTML = `
       <p style="font-size:.83rem;color:var(--mocha);margin-bottom:12px;">📅 ${fmtDate(date)}</p>
       <div class="section-label">Coffee Shop Bill (Items)</div>
@@ -810,22 +854,49 @@ async function openBillModal(date) {
         <tbody>${memberRows}</tbody>
         <tfoot><tr class="total-row"><td colspan="3">Total</td><td>₹${parseFloat(grandTotal).toLocaleString('en-IN')}</td></tr></tfoot>
       </table>
+      ${payHistoryHtml}
       <div class="divider"></div>
-      <div class="flex-between"><span class="bold" style="font-size:1rem;">Pay to Coffee Shop</span>
-        <span class="grand-total-lbl">₹${parseFloat(grandTotal).toLocaleString('en-IN')}</span></div>`;
+      <div class="pay-row"><span>Bill total</span><span>₹${parseFloat(grandTotal).toLocaleString('en-IN')}</span></div>
+      <div class="pay-row"><span>Already paid</span><span>₹${amountPaid.toLocaleString('en-IN')}</span></div>
+      <div class="flex-between"><span class="bold" style="font-size:1rem;">Pending balance</span>
+        <span class="grand-total-lbl">₹${pending.toLocaleString('en-IN')}</span></div>`;
+
+    document.getElementById('payAmountInput').value = pending > 0 ? pending : '';
+    document.getElementById('payAmountInput').max = pending;
   } catch(e) {
     document.getElementById('billModalBody').innerHTML = `<p style="color:var(--danger);">${e.message}</p>`;
   }
 }
 
+function fillPayAmount(which) {
+  const input = document.getElementById('payAmountInput');
+  if (which === 'full') input.value = pendingBillAmount;
+  else if (which === 'half') input.value = (Math.round((pendingBillAmount/2)*100)/100);
+}
+
 async function payNow() {
   if (!pendingPayDate) return;
+  const raw = document.getElementById('payAmountInput').value;
+  const amount = raw === '' ? undefined : parseFloat(raw);
+  if (amount !== undefined && (isNaN(amount) || amount <= 0)) { toast('Enter a valid amount'); return; }
   try {
-    await api('POST','/api/tab/pay',{date:pendingPayDate});
+    const res = await api('POST','/api/tab/pay',{date:pendingPayDate, amount});
     closeModal('billModal');
-    toast('💰 Paid! Session closed.');
+    if (res.pending > 0) toast(`💰 ₹${res.amountPaid.toLocaleString('en-IN')} paid · ₹${res.pending.toLocaleString('en-IN')} still pending`);
+    else toast('💰 Paid in full! Session closed.');
     loadLiveBoard();
   } catch(e) { toast('Error: '+e.message); }
+}
+
+async function undoPayment(paymentId) {
+  confirm('Undo Payment','Remove this payment record? This does not move any real money — only corrects the tab.',async()=>{
+    try {
+      await api('DELETE',`/api/tab/payments/${paymentId}`);
+      toast('Payment removed');
+      openBillModal(pendingPayDate);
+      loadLiveBoard();
+    } catch(e) { toast('Error: '+e.message); }
+  },'Remove','btn-danger');
 }
 
 async function reopenSession(date) {
@@ -956,7 +1027,7 @@ async function loadHistory() {
         <div class="flex-between">
           <div>
             <div class="hist-date">${fmtDate(String(s.date).substring(0,10))}</div>
-            <div class="hist-meta">${s.member_count} member(s) · <span class="badge badge-${s.status}">${s.status}</span></div>
+            <div class="hist-meta">${s.member_count} member(s) · <span class="badge badge-${s.status}">${s.status}</span>${s.status==='partial'?` · ₹${parseFloat(s.pending).toLocaleString('en-IN')} pending`:''}</div>
           </div>
           <div class="hist-amt">₹${parseFloat(s.total).toLocaleString('en-IN')}</div>
         </div>
