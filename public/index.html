@@ -240,6 +240,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="nav" id="memberNav">
     <button class="nav-btn active" onclick="showPage('addItems')">➕ Add Items</button>
     <button class="nav-btn" onclick="showPage('myTab')">🧾 My Tab</button>
+    <button class="nav-btn" onclick="showPage('history')">📅 History</button>
   </div>
 
   <!-- ADMIN NAV -->
@@ -333,7 +334,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <div class="card"><div class="card-title">🍵 Menu Items</div><div id="itemsList"></div></div>
   </div>
 
-  <!-- ══ HISTORY (admin) ══ -->
+  <!-- ══ HISTORY (all members) ══ -->
   <div class="page" id="page-history">
     <div class="card"><div class="card-title">📅 Past Sessions</div><div id="historyList"></div></div>
   </div>
@@ -1036,8 +1037,13 @@ async function loadHistory() {
 }
 
 function viewHistorySession(date) {
-  document.getElementById('boardDate').value=date;
-  showPage('liveBoard');
+  if (currentUser && currentUser.isAdmin) {
+    document.getElementById('boardDate').value = date;
+    showPage('liveBoard');
+  } else {
+    document.getElementById('myTabDate').value = date;
+    showPage('myTab');
+  }
 }
 
 // ════════════════════════════════════════════════════════
