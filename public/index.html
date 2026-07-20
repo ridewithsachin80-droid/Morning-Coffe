@@ -308,6 +308,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
       <button class="btn btn-ghost btn-sm" onclick="setToday()">Today</button>
     </div>
 
+    <div id="advanceBanner"></div>
     <div id="payBanner"></div>
 
     <div class="stats-grid" id="boardStats"></div>
@@ -406,6 +407,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('billModal')">Close</button>
       <button class="btn btn-success" id="payNowBtn" onclick="payNow()">💰 Confirm Payment</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="advanceModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-title">💳 Advance Credit</div>
+    <div id="advanceModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('advanceModal')">Close</button>
     </div>
   </div>
 </div>
@@ -776,9 +787,21 @@ async function loadLiveBoard() {
   const cont  = document.getElementById('liveBoardContent');
   const stats = document.getElementById('boardStats');
   const pay   = document.getElementById('payBanner');
+  const advBanner = document.getElementById('advanceBanner');
   cont.innerHTML  = '<div class="empty-state"><div class="spinner"></div></div>';
   stats.innerHTML = '';
   pay.innerHTML   = '';
+
+  // Advance credit balance — always visible here, independent of the selected round
+  try {
+    const adv = await api('GET', '/api/advance');
+    advBanner.innerHTML = adv.balance > 0
+      ? `<div style="background:#e8f5e9;border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;" onclick="showAdvanceLedger()">
+           <span style="font-size:.83rem;color:#2e5a2e;">💳 ₹${adv.balance.toLocaleString('en-IN')} advance credit on hand</span>
+           <span style="font-size:.78rem;color:#2e5a2e;text-decoration:underline;">View</span>
+         </div>`
+      : '';
+  } catch(e) { advBanner.innerHTML = ''; }
 
   try {
     const { sessionId } = await populateRoundSelect('boardRoundSel', date);
@@ -955,6 +978,35 @@ async function openBillModal(sessionId) {
     }
   } catch(e) {
     document.getElementById('billModalBody').innerHTML = `<p style="color:var(--danger);">${e.message}</p>`;
+  }
+}
+
+async function showAdvanceLedger() {
+  openModal('advanceModal');
+  const body = document.getElementById('advanceModalBody');
+  body.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  try {
+    const { balance, ledger } = await api('GET', '/api/advance');
+    const rows = (ledger||[]).map(l=>{
+      const isCredit = parseFloat(l.amount) > 0;
+      const roundLbl = l.date ? `${fmtDate(String(l.date).substring(0,10))}${l.round_no>1?` · Round ${l.round_no}`:''}` : '—';
+      return `<div class="pay-hist-row">
+        <span>
+          <div>${roundLbl}</div>
+          <div style="font-size:.75rem;color:var(--mocha);">${l.payer_name || '—'}${l.note?` · ${l.note}`:''}</div>
+        </span>
+        <span class="bold" style="color:${isCredit?'#2e5a2e':'#a03030'};">${isCredit?'+':''}₹${Math.abs(parseFloat(l.amount)).toLocaleString('en-IN')}</span>
+      </div>`;
+    }).join('');
+    body.innerHTML = `
+      <div class="flex-between" style="margin-bottom:12px;">
+        <span class="bold" style="font-size:1rem;">Current balance</span>
+        <span class="grand-total-lbl">₹${balance.toLocaleString('en-IN')}</span>
+      </div>
+      <div class="section-label">History</div>
+      ${rows || '<p style="color:var(--mocha);font-size:.85rem;">No advance activity yet</p>'}`;
+  } catch(e) {
+    body.innerHTML = `<p style="color:var(--danger);">${e.message}</p>`;
   }
 }
 
@@ -1182,8 +1234,8 @@ async function loadReport() {
         <div class="stat-card sc4"><div class="stat-num">${r.roundCount}</div><div class="stat-lbl">📋 Rounds</div></div>
       </div>
       ${(r.advanceAdded>0||r.advanceUsed>0||r.advanceBalance>0)?`
-      <div style="background:#e8f5e9;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:.83rem;color:#2e5a2e;">
-        💳 Advance credit — added ₹${r.advanceAdded.toLocaleString('en-IN')}, used ₹${r.advanceUsed.toLocaleString('en-IN')} in this range · current balance ₹${r.advanceBalance.toLocaleString('en-IN')}
+      <div style="background:#e8f5e9;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:.83rem;color:#2e5a2e;cursor:pointer;" onclick="showAdvanceLedger()">
+        💳 Advance credit — added ₹${r.advanceAdded.toLocaleString('en-IN')}, used ₹${r.advanceUsed.toLocaleString('en-IN')} in this range · current balance ₹${r.advanceBalance.toLocaleString('en-IN')} <span style="text-decoration:underline;">(view ledger)</span>
       </div>`:''}
       <div class="section-label">Items</div>
       <table class="bill-table" style="margin-bottom:16px;">
