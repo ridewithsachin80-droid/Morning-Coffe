@@ -53,8 +53,20 @@ CREATE TABLE IF NOT EXISTS session_payments (
   session_id  INT NOT NULL REFERENCES daily_sessions(id) ON DELETE CASCADE,
   amount      NUMERIC(10,2) NOT NULL CHECK (amount > 0),
   paid_by     INT REFERENCES members(id),
+  payer_name  VARCHAR(100),        -- who actually handed over the money (free text; supports multiple payers)
   note        VARCHAR(200),
   paid_at     TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE session_payments ADD COLUMN IF NOT EXISTS payer_name VARCHAR(100);
+
+-- Advance/credit pool: positive rows = overpayment credit added, negative rows = credit applied to a bill
+CREATE TABLE IF NOT EXISTS advance_ledger (
+  id          SERIAL PRIMARY KEY,
+  amount      NUMERIC(10,2) NOT NULL,
+  session_id  INT REFERENCES daily_sessions(id) ON DELETE SET NULL,
+  payer_name  VARCHAR(100),
+  note        VARCHAR(200),
+  created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -71,6 +83,8 @@ CREATE INDEX IF NOT EXISTS idx_tab_added     ON tab_entries(added_at);
 CREATE INDEX IF NOT EXISTS idx_session_date  ON daily_sessions(date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_date_round ON daily_sessions(date, round_no);
 CREATE INDEX IF NOT EXISTS idx_payments_session ON session_payments(session_id);
+CREATE INDEX IF NOT EXISTS idx_advance_session ON advance_ledger(session_id);
+CREATE INDEX IF NOT EXISTS idx_advance_created ON advance_ledger(created_at);
 
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);

@@ -242,6 +242,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <button class="nav-btn" onclick="showPage('myTab')">🧾 My Tab</button>
     <button class="nav-btn" onclick="showPage('liveBoard')">💰 Pay Shop</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
+    <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
   <!-- ADMIN NAV -->
@@ -251,6 +252,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <button class="nav-btn" onclick="showPage('members')">👥 Members</button>
     <button class="nav-btn" onclick="showPage('adminItems')">🍵 Items</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
+    <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
   <!-- ══ ADD ITEMS (member & admin) ══ -->
@@ -344,6 +346,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <div class="card"><div class="card-title">📅 Past Sessions</div><div id="historyList"></div></div>
   </div>
 
+  <!-- ══ REPORT (all members) ══ -->
+  <div class="page" id="page-report">
+    <div class="card">
+      <div class="card-title">📊 Date-wise Report</div>
+      <div class="flex gap-8" style="align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">
+        <div><label class="form-label">From</label><input type="date" class="form-input" id="reportFrom" style="width:auto;"></div>
+        <div><label class="form-label">To</label><input type="date" class="form-input" id="reportTo" style="width:auto;"></div>
+        <button class="btn btn-primary btn-sm" onclick="loadReport()">Generate</button>
+      </div>
+      <div id="reportContent"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- MODALS -->
@@ -377,8 +392,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="modal" style="max-width:520px;">
     <div class="modal-title">🧾 Bill for Coffee Shop</div>
     <div id="billModalBody"></div>
+    <div id="advanceApplyRow"></div>
     <div class="form-group" id="payAmountGroup" style="margin-top:10px;">
-      <label class="form-label">Amount to pay now</label>
+      <label class="form-label">Payer name</label>
+      <input type="text" class="form-input" id="payerNameInput" placeholder="Who's paying?" style="margin-bottom:8px;">
+      <label class="form-label">Amount to pay now <span style="text-transform:none;font-weight:400;">(paying more than pending is OK — the extra becomes advance credit)</span></label>
       <input type="number" class="form-input" id="payAmountInput" min="0" step="0.01" placeholder="0.00">
       <div class="flex gap-8" style="margin-top:6px;">
         <button class="btn btn-ghost btn-sm" type="button" onclick="fillPayAmount('half')">½ pending</button>
@@ -560,6 +578,7 @@ const PAGE_LOADERS = {
   members:    loadMembers,
   adminItems: loadAdminItems,
   history:    loadHistory,
+  report:     loadReport,
 };
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -852,16 +871,19 @@ async function loadLiveBoard() {
 // BILL MODAL & PAY
 // ════════════════════════════════════════════════════════
 let pendingBillAmount = 0; // current pending balance for the open bill modal
+let advanceAvailable  = 0; // current advance credit balance
 
 async function openBillModal(sessionId) {
   pendingPaySessionId = sessionId;
   openModal('billModal');
   document.getElementById('billModalBody').innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   document.getElementById('payAmountInput').value = '';
+  document.getElementById('payerNameInput').value = currentUser.name || '';
 
   try {
-    const { session, byMember, itemSummary, grandTotal, payments, amountPaid, pending } = await api('GET',`/api/tab/all?session_id=${sessionId}`);
+    const { session, byMember, itemSummary, grandTotal, payments, amountPaid, pending, advanceBalance } = await api('GET',`/api/tab/all?session_id=${sessionId}`);
     pendingBillAmount = pending;
+    advanceAvailable  = advanceBalance || 0;
 
     // Item summary for coffee shop
     const itemRows = Object.entries(itemSummary)
@@ -879,12 +901,13 @@ async function openBillModal(sessionId) {
       .map(([name,d])=>`<tr><td>${name}</td><td colspan="2"></td><td>₹${d.total.toLocaleString('en-IN')}</td></tr>`)
       .join('');
 
-    // Payment history (partial payments already made)
+    // Payment history (partial payments already made — shows whoever actually paid, not just who recorded it)
     const payRows = (payments||[]).map(p=>{
       const canUndo = currentUser.isAdmin || p.paid_by === currentUser.memberId;
+      const who = p.payer_name || p.paid_by_name || '—';
       return `
       <div class="pay-hist-row">
-        <span>${fmtDate(p.paid_at.substring(0,10))} ${fmtTime(p.paid_at)} · ${p.paid_by_name||'—'}</span>
+        <span>${fmtDate(p.paid_at.substring(0,10))} ${fmtTime(p.paid_at)} · ${who}</span>
         <span class="flex gap-8" style="align-items:center;">
           <span class="bold">₹${parseFloat(p.amount).toLocaleString('en-IN')}</span>
           ${canUndo?`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;" onclick="undoPayment(${p.id})">✕</button>`:''}
@@ -917,10 +940,32 @@ async function openBillModal(sessionId) {
         <span class="grand-total-lbl">₹${pending.toLocaleString('en-IN')}</span></div>`;
 
     document.getElementById('payAmountInput').value = pending > 0 ? pending : '';
-    document.getElementById('payAmountInput').max = pending;
+
+    // Offer to apply advance credit if there's both a balance and something pending
+    const advRow = document.getElementById('advanceApplyRow');
+    if (advanceAvailable > 0 && pending > 0) {
+      advRow.innerHTML = `<div style="background:#e8f5e9;border-radius:8px;padding:10px 14px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span style="font-size:.83rem;color:#2e5a2e;">💳 ₹${advanceAvailable.toLocaleString('en-IN')} advance credit available</span>
+        <button class="btn btn-success btn-sm" onclick="applyAdvance()">Use Advance</button>
+      </div>`;
+    } else if (advanceAvailable > 0) {
+      advRow.innerHTML = `<div style="font-size:.8rem;color:var(--mocha);margin-top:10px;">💳 ₹${advanceAvailable.toLocaleString('en-IN')} advance credit on hand (nothing pending here to apply it to)</div>`;
+    } else {
+      advRow.innerHTML = '';
+    }
   } catch(e) {
     document.getElementById('billModalBody').innerHTML = `<p style="color:var(--danger);">${e.message}</p>`;
   }
+}
+
+async function applyAdvance() {
+  if (!pendingPaySessionId) return;
+  try {
+    const res = await api('POST','/api/tab/apply-advance',{session_id:pendingPaySessionId});
+    toast(`💳 Advance applied — ₹${res.pending.toLocaleString('en-IN')} still pending`);
+    openBillModal(pendingPaySessionId);
+    loadLiveBoard();
+  } catch(e) { toast('Error: '+e.message); }
 }
 
 function fillPayAmount(which) {
@@ -934,10 +979,12 @@ async function payNow() {
   const raw = document.getElementById('payAmountInput').value;
   const amount = raw === '' ? undefined : parseFloat(raw);
   if (amount !== undefined && (isNaN(amount) || amount <= 0)) { toast('Enter a valid amount'); return; }
+  const payerName = document.getElementById('payerNameInput').value.trim();
   try {
-    const res = await api('POST','/api/tab/pay',{session_id:pendingPaySessionId, amount});
+    const res = await api('POST','/api/tab/pay',{session_id:pendingPaySessionId, amount, payer_name: payerName});
     closeModal('billModal');
-    if (res.pending > 0) toast(`💰 ₹${res.amountPaid.toLocaleString('en-IN')} paid · ₹${res.pending.toLocaleString('en-IN')} still pending`);
+    if (res.excess > 0) toast(`💰 Paid in full + ₹${res.excess.toLocaleString('en-IN')} added as advance credit`);
+    else if (res.pending > 0) toast(`💰 ₹${res.amountPaid.toLocaleString('en-IN')} paid · ₹${res.pending.toLocaleString('en-IN')} still pending`);
     else toast('💰 Paid in full! Round closed — a new round starts automatically on the next item.');
     loadLiveBoard();
   } catch(e) { toast('Error: '+e.message); }
@@ -1101,6 +1148,59 @@ function viewHistorySession(date, sessionId) {
     document.getElementById('myTabDate').value = date;
     showPage('myTab');
   }
+}
+
+// ════════════════════════════════════════════════════════
+// REPORT (date range)
+// ════════════════════════════════════════════════════════
+async function loadReport() {
+  const fromEl = document.getElementById('reportFrom');
+  const toEl   = document.getElementById('reportTo');
+  if (!fromEl.value) { const d=new Date(); d.setDate(d.getDate()-6); fromEl.value = d.toISOString().split('T')[0]; }
+  if (!toEl.value) toEl.value = todayStr();
+  const from = fromEl.value, to = toEl.value;
+
+  const cont = document.getElementById('reportContent');
+  cont.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  try {
+    const r = await api('GET', `/api/reports?from=${from}&to=${to}`);
+
+    const itemRows = r.items.map(i=>`<tr><td>${i.item_name}</td><td style="text-align:center;">${i.qty}</td><td>₹${parseFloat(i.amount).toLocaleString('en-IN')}</td></tr>`).join('');
+    const payerRows = r.payers.map(p=>`<tr><td>${p.payer_name}</td><td style="text-align:center;">${p.payment_count}</td><td>₹${parseFloat(p.amount).toLocaleString('en-IN')}</td></tr>`).join('');
+    const sessionRows = r.sessions.map(s=>`<tr>
+        <td>${fmtDate(String(s.date).substring(0,10))}${s.round_no>1?` (R${s.round_no})`:''}</td>
+        <td><span class="badge badge-${s.status}">${s.status}</span></td>
+        <td>₹${parseFloat(s.total).toLocaleString('en-IN')}</td>
+        <td>₹${parseFloat(s.paid).toLocaleString('en-IN')}</td>
+      </tr>`).join('');
+
+    cont.innerHTML = `
+      <div class="stats-grid" style="margin-bottom:16px;">
+        <div class="stat-card sc1"><div class="stat-num">₹${r.totalBill.toLocaleString('en-IN')}</div><div class="stat-lbl">💰 Total bill</div></div>
+        <div class="stat-card sc2"><div class="stat-num">₹${r.totalPaid.toLocaleString('en-IN')}</div><div class="stat-lbl">✅ Total paid</div></div>
+        <div class="stat-card sc3"><div class="stat-num">₹${r.totalPending.toLocaleString('en-IN')}</div><div class="stat-lbl">🟠 Pending</div></div>
+        <div class="stat-card sc4"><div class="stat-num">${r.roundCount}</div><div class="stat-lbl">📋 Rounds</div></div>
+      </div>
+      ${(r.advanceAdded>0||r.advanceUsed>0||r.advanceBalance>0)?`
+      <div style="background:#e8f5e9;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:.83rem;color:#2e5a2e;">
+        💳 Advance credit — added ₹${r.advanceAdded.toLocaleString('en-IN')}, used ₹${r.advanceUsed.toLocaleString('en-IN')} in this range · current balance ₹${r.advanceBalance.toLocaleString('en-IN')}
+      </div>`:''}
+      <div class="section-label">Items</div>
+      <table class="bill-table" style="margin-bottom:16px;">
+        <thead><tr><th>Item</th><th style="text-align:center;">Qty</th><th>Amount</th></tr></thead>
+        <tbody>${itemRows || '<tr><td colspan="3">No items in this range</td></tr>'}</tbody>
+      </table>
+      <div class="section-label">Payers</div>
+      <table class="bill-table" style="margin-bottom:16px;">
+        <thead><tr><th>Payer</th><th style="text-align:center;">Payments</th><th>Amount</th></tr></thead>
+        <tbody>${payerRows || '<tr><td colspan="3">No payments in this range</td></tr>'}</tbody>
+      </table>
+      <div class="section-label">Rounds</div>
+      <table class="bill-table">
+        <thead><tr><th>Date</th><th>Status</th><th>Bill</th><th>Paid</th></tr></thead>
+        <tbody>${sessionRows || '<tr><td colspan="4">No rounds in this range</td></tr>'}</tbody>
+      </table>`;
+  } catch(e) { cont.innerHTML = `<p style="color:var(--danger);">${e.message}</p>`; }
 }
 
 // ════════════════════════════════════════════════════════

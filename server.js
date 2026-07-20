@@ -212,6 +212,11 @@ async function resolveSession(query) {
   return all.length ? all[all.length - 1] : null;
 }
 
+// Format a DB DATE value (which pg returns as a JS Date) as YYYY-MM-DD
+function dateStr(d) {
+  return d instanceof Date ? d.toISOString().split('T')[0] : String(d).substring(0, 10);
+}
+
 // Compute grand total, amount paid so far, and pending balance for a session
 async function getSessionMoney(sessionId) {
   const { rows: t } = await pool.query(
@@ -222,6 +227,12 @@ async function getSessionMoney(sessionId) {
   const amountPaid = parseFloat(p[0].paid);
   const pending    = Math.max(0, Math.round((grandTotal - amountPaid) * 100) / 100);
   return { grandTotal, amountPaid, pending };
+}
+
+// Current group-wide advance/credit balance (from overpayments to the coffee shop)
+async function getAdvanceBalance() {
+  const { rows } = await pool.query('SELECT COALESCE(SUM(amount),0) as bal FROM advance_ledger');
+  return Math.round(parseFloat(rows[0].bal) * 100) / 100;
 }
 
 // Read-only status check for the "Add Items" banner — never creates a round
@@ -341,39 +352,101 @@ app.get('/api/tab/all', auth, async (req, res) => {
        WHERE sp.session_id=$1 ORDER BY sp.paid_at`, [sess.id]);
     const amountPaid = payments.reduce((s, p) => s + parseFloat(p.amount), 0);
     const pending    = Math.max(0, Math.round((grandTotal - amountPaid) * 100) / 100);
+    const advanceBalance = await getAdvanceBalance();
 
-    res.json({ session: sess, byMember, itemSummary, grandTotal, entryCount: entries.length, payments, amountPaid, pending });
+    res.json({ session: sess, byMember, itemSummary, grandTotal, entryCount: entries.length, payments, amountPaid, pending, advanceBalance });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Any member: record a payment against a session (full or partial)
+// Any member: record a payment against a session (full or partial). Paying more
+// than the pending balance is allowed — the excess becomes advance credit that
+// can be applied to future rounds instead of being rejected.
 app.post('/api/tab/pay', auth, async (req, res) => {
   try {
     const sess = await resolveSession(req.body);
     if (!sess) return res.status(404).json({ error: 'No session found to pay' });
-    if (sess.status === 'paid') return res.status(400).json({ error: 'This round is already fully paid' });
 
     const { grandTotal, pending } = await getSessionMoney(sess.id);
     if (grandTotal <= 0) return res.status(400).json({ error: 'Nothing to pay yet' });
+    if (pending <= 0 && (req.body.amount === undefined || req.body.amount === null || req.body.amount === ''))
+      return res.status(400).json({ error: 'This round is already fully paid — enter an amount to record it as advance credit' });
 
-    // Default to paying the full remaining balance if no amount given
     let amount = req.body.amount !== undefined && req.body.amount !== null && req.body.amount !== ''
       ? parseFloat(req.body.amount) : pending;
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' });
-    if (amount > pending + 0.01) return res.status(400).json({ error: `Amount exceeds pending balance of ₹${pending.toFixed(2)}` });
 
-    await pool.query(
-      `INSERT INTO session_payments (session_id, amount, paid_by, note) VALUES ($1,$2,$3,$4)`,
-      [sess.id, Math.round(amount * 100) / 100, req.user.member_id, req.body.note || null]);
+    const payerName = (req.body.payer_name && req.body.payer_name.trim()) || req.user.name;
+    const note = req.body.note || null;
+    const applyToRound = Math.round(Math.min(amount, pending) * 100) / 100;
+    const excess = Math.round((amount - applyToRound) * 100) / 100;
+
+    if (applyToRound > 0) {
+      await pool.query(
+        `INSERT INTO session_payments (session_id, amount, paid_by, payer_name, note) VALUES ($1,$2,$3,$4,$5)`,
+        [sess.id, applyToRound, req.user.member_id, payerName, note]);
+    }
+    if (excess > 0) {
+      await pool.query(
+        `INSERT INTO advance_ledger (amount, session_id, payer_name, note) VALUES ($1,$2,$3,$4)`,
+        [excess, sess.id, payerName, note || `Overpayment on ${dateStr(sess.date)} Round ${sess.round_no}`]);
+    }
 
     const money = await getSessionMoney(sess.id);
     const newStatus = money.pending <= 0.01 ? 'paid' : 'partial';
-
     const { rows } = await pool.query(
       `UPDATE daily_sessions SET status=$1, paid_at=NOW(), paid_by=$2 WHERE id=$3 RETURNING *`,
       [newStatus, req.user.member_id, sess.id]);
 
-    res.json({ ok: true, session: rows[0], amountPaid: money.amountPaid, pending: money.pending });
+    const advanceBalance = await getAdvanceBalance();
+    res.json({ ok: true, session: rows[0], amountPaid: money.amountPaid, pending: money.pending, excess, advanceBalance });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Any member: apply available advance credit toward a round's pending balance
+app.post('/api/tab/apply-advance', auth, async (req, res) => {
+  try {
+    const sess = await resolveSession(req.body);
+    if (!sess) return res.status(404).json({ error: 'No session found' });
+    const { pending } = await getSessionMoney(sess.id);
+    if (pending <= 0) return res.status(400).json({ error: 'Nothing pending on this round' });
+
+    const available = await getAdvanceBalance();
+    if (available <= 0) return res.status(400).json({ error: 'No advance credit available' });
+
+    let amount = req.body.amount !== undefined && req.body.amount !== null && req.body.amount !== ''
+      ? parseFloat(req.body.amount) : Math.min(available, pending);
+    if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' });
+    if (amount > available + 0.01) return res.status(400).json({ error: `Only ₹${available.toFixed(2)} advance credit available` });
+    if (amount > pending + 0.01) return res.status(400).json({ error: `Amount exceeds pending balance of ₹${pending.toFixed(2)}` });
+    amount = Math.round(amount * 100) / 100;
+
+    await pool.query(
+      `INSERT INTO session_payments (session_id, amount, paid_by, payer_name, note) VALUES ($1,$2,$3,'Advance Credit','Applied from advance credit')`,
+      [sess.id, amount, req.user.member_id]);
+    await pool.query(
+      `INSERT INTO advance_ledger (amount, session_id, note) VALUES ($1,$2,$3)`,
+      [-amount, sess.id, `Applied to ${dateStr(sess.date)} Round ${sess.round_no}`]);
+
+    const money = await getSessionMoney(sess.id);
+    const newStatus = money.pending <= 0.01 ? 'paid' : 'partial';
+    const { rows } = await pool.query(
+      `UPDATE daily_sessions SET status=$1, paid_at=NOW(), paid_by=$2 WHERE id=$3 RETURNING *`,
+      [newStatus, req.user.member_id, sess.id]);
+
+    const advanceBalance = await getAdvanceBalance();
+    res.json({ ok: true, session: rows[0], amountPaid: money.amountPaid, pending: money.pending, advanceBalance });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Everyone: current advance balance + recent ledger history
+app.get('/api/advance', auth, async (req, res) => {
+  try {
+    const balance = await getAdvanceBalance();
+    const { rows } = await pool.query(
+      `SELECT al.*, ds.date, ds.round_no FROM advance_ledger al
+       LEFT JOIN daily_sessions ds ON ds.id = al.session_id
+       ORDER BY al.created_at DESC LIMIT 50`);
+    res.json({ balance, ledger: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -400,8 +473,7 @@ app.post('/api/tab/reopen', auth, adminOnly, async (req, res) => {
   try {
     const sess = await resolveSession(req.body);
     if (!sess) return res.status(404).json({ error: 'No session found to reopen' });
-    const dateStr = sess.date instanceof Date ? sess.date.toISOString().split('T')[0] : String(sess.date).substring(0, 10);
-    const all = await listSessionsForDate(dateStr);
+    const all = await listSessionsForDate(dateStr(sess.date));
     const latest = all[all.length - 1];
     if (latest.id !== sess.id) return res.status(400).json({ error: 'A newer round already exists for this date — only the latest round can be reopened' });
     await pool.query(`UPDATE daily_sessions SET status='open' WHERE id=$1`, [sess.id]);
@@ -425,6 +497,66 @@ app.get('/api/sessions', auth, async (req, res) => {
                   FROM session_payments GROUP BY session_id) sp ON sp.session_id = ds.id
        ORDER BY ds.date DESC, ds.round_no DESC LIMIT 30`);
     res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Everyone: date-range report — totals, item breakdown, payer breakdown, advance activity
+app.get('/api/reports', auth, async (req, res) => {
+  try {
+    const to   = req.query.to   || new Date().toISOString().split('T')[0];
+    const from = req.query.from || to;
+
+    // Per-round totals within range
+    const { rows: sessions } = await pool.query(
+      `SELECT ds.id, ds.date, ds.round_no, ds.status,
+              COALESCE(te.total,0) as total,
+              COALESCE(sp.paid,0)  as paid
+       FROM daily_sessions ds
+       LEFT JOIN (SELECT session_id, SUM(amount) as total FROM tab_entries GROUP BY session_id) te ON te.session_id = ds.id
+       LEFT JOIN (SELECT session_id, SUM(amount) as paid  FROM session_payments GROUP BY session_id) sp ON sp.session_id = ds.id
+       WHERE ds.date BETWEEN $1 AND $2
+       ORDER BY ds.date, ds.round_no`, [from, to]);
+
+    // Item-wise breakdown across the range
+    const { rows: items } = await pool.query(
+      `SELECT te.item_name, SUM(te.qty) as qty, SUM(te.amount) as amount
+       FROM tab_entries te JOIN daily_sessions ds ON ds.id = te.session_id
+       WHERE ds.date BETWEEN $1 AND $2
+       GROUP BY te.item_name ORDER BY amount DESC`, [from, to]);
+
+    // Payer-wise breakdown across the range (free-text payer name, so multiple payers per day/round are captured)
+    const { rows: payers } = await pool.query(
+      `SELECT COALESCE(sp.payer_name, m.name, 'Unknown') as payer_name, SUM(sp.amount) as amount, COUNT(*) as payment_count
+       FROM session_payments sp
+       JOIN daily_sessions ds ON ds.id = sp.session_id
+       LEFT JOIN members m ON m.id = sp.paid_by
+       WHERE ds.date BETWEEN $1 AND $2
+       GROUP BY COALESCE(sp.payer_name, m.name, 'Unknown') ORDER BY amount DESC`, [from, to]);
+
+    // Advance credit added/used within range
+    const { rows: advRows } = await pool.query(
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE amount > 0),0) as added,
+              COALESCE(SUM(-amount) FILTER (WHERE amount < 0),0) as used
+       FROM advance_ledger WHERE created_at::date BETWEEN $1 AND $2`, [from, to]);
+
+    const totalBill    = sessions.reduce((s,x)=>s+parseFloat(x.total),0);
+    const totalPaid    = sessions.reduce((s,x)=>s+parseFloat(x.paid),0);
+    const totalPending = Math.max(0, Math.round((totalBill - totalPaid) * 100) / 100);
+    const advanceBalance = await getAdvanceBalance();
+
+    res.json({
+      from, to,
+      totalBill: Math.round(totalBill*100)/100,
+      totalPaid: Math.round(totalPaid*100)/100,
+      totalPending,
+      roundCount: sessions.length,
+      sessions,
+      items,
+      payers,
+      advanceAdded: parseFloat(advRows[0].added),
+      advanceUsed: parseFloat(advRows[0].used),
+      advanceBalance
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
