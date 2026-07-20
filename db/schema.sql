@@ -86,6 +86,24 @@ CREATE INDEX IF NOT EXISTS idx_payments_session ON session_payments(session_id);
 CREATE INDEX IF NOT EXISTS idx_advance_session ON advance_ledger(session_id);
 CREATE INDEX IF NOT EXISTS idx_advance_created ON advance_ledger(created_at);
 
+-- Backfill: sessions marked 'paid' before per-payment tracking existed have no
+-- session_payments rows, so history/reports show them as ₹0 paid. Give each one
+-- a single full-payment row so old history displays correctly. Safe to re-run:
+-- only affects 'paid' sessions that still have zero payment rows.
+INSERT INTO session_payments (session_id, amount, paid_by, payer_name, note, paid_at)
+SELECT ds.id,
+       te.total,
+       ds.paid_by,
+       COALESCE(m.name, 'Unknown'),
+       'Backfilled — paid before per-payment tracking existed',
+       COALESCE(ds.paid_at, ds.created_at)
+FROM daily_sessions ds
+JOIN (SELECT session_id, SUM(amount) as total FROM tab_entries GROUP BY session_id) te ON te.session_id = ds.id
+LEFT JOIN members m ON m.id = ds.paid_by
+WHERE ds.status = 'paid'
+  AND te.total > 0
+  AND NOT EXISTS (SELECT 1 FROM session_payments sp WHERE sp.session_id = ds.id);
+
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 
