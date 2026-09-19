@@ -45,7 +45,10 @@
   --latte:var(--canvas); --white:var(--surface); --info:#7FB2FF;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html{background:var(--canvas);}
+html{background:var(--canvas);overflow-x:hidden;}
+body{overflow-x:hidden;max-width:100vw;}
+#liveBoardDate,#liveBoardDate>.flex{flex-wrap:wrap;gap:8px;}
+.modal{max-width:min(460px,calc(100vw - 32px));}
 body{font-family:var(--sans);font-size:15px;line-height:1.45;color:var(--ceramic);min-height:100vh;
   background:radial-gradient(120% 55% at 50% -8%,var(--canvas-lift) 0%,var(--canvas) 62%) fixed,var(--canvas);
   -webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"ss01" 1;}
@@ -302,6 +305,13 @@ option{background:var(--raised);color:var(--ceramic);}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms !important;transition-duration:.001ms !important;}.mic-btn::before{animation:none;}}
 @media print{:root{color-scheme:light;--canvas:#fff;--surface:#fff;--raised:#fff;--sunken:#fff;--ceramic:#111;--ceramic-dim:#333;--muted:#555;--gold:#7a5a12;--gold-hi:#7a5a12;--line:#ddd;--line-strong:#bbb;}
   body{background:#fff;}.header,.nav,#aiDock,.btn,.toast{display:none !important;}.card,.stat-card,.member-tab-card{box-shadow:none;}}
+.ans-heard{font-size:.78rem;color:var(--muted);margin:-8px 0 12px;font-style:italic;}
+.ans-big{font-family:var(--serif);font-size:2.6rem;line-height:1.05;color:var(--gold-hi);}
+.ans-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-md);margin-top:8px;}
+.ans-row .amt{font-family:var(--serif);font-size:1.25rem;color:var(--gold-hi);white-space:nowrap;}
+.ans-eg{display:block;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 12px;margin-top:6px;color:var(--ceramic-dim);font-size:.86rem;cursor:pointer;}
+.ans-eg:hover{border-color:var(--gold);color:var(--gold-hi);}
+.ans-group{font-size:.76rem;color:var(--muted);margin:14px 0 2px;}
 </style>
 </head>
 <body>
@@ -374,7 +384,7 @@ option{background:var(--raised);color:var(--ceramic);}
     <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
-  <!-- ══ AI DOCK — home of the app: lives above the pages, shown on Live Board + Add Items ══ -->
+  <!-- ══ AI DOCK — lives above the pages and is available on every screen ══ -->
   <div id="aiDock" style="max-width:860px;margin:0 auto;padding:14px 14px 0;">
     <!-- AI order: speak or type, confirm, done -->
     <div class="ai-card" id="aiCard">
@@ -385,10 +395,10 @@ option{background:var(--raised);color:var(--ceramic);}
         </select>
       </div>
       <button class="mic-btn" id="micBtn" onclick="aiMicTap()" aria-label="Speak your order"><span id="micIcon" style="display:flex;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" stroke="none"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg></span><span class="mic-level" id="micLevel"></span></button>
-      <div class="ai-status" id="aiStatus">Tap and say what you had</div>
-      <div class="ai-hint" id="aiHint">“Two coffee and one vada… one tea for Ravi” &nbsp;·&nbsp; “my usual”</div>
+      <div class="ai-status" id="aiStatus">Tap and tell me</div>
+      <div class="ai-hint" id="aiHint">“Two coffee, one tea for Ravi”  ·  “Pay the bill”  ·  “What’s outstanding?”</div>
       <div class="ai-text-row">
-        <input type="text" id="aiText" placeholder="…or type it: 2 coffee, 1 bonda" autocomplete="off" enterkeyhint="send" onkeydown="if(event.key==='Enter')aiSendText()">
+        <input type="text" id="aiText" placeholder="…or type: 2 coffee · pay the bill" autocomplete="off" enterkeyhint="send" onkeydown="if(event.key==='Enter')aiSendText()">
         <button onclick="aiSendText()" aria-label="Send">➤</button>
       </div>
     </div>
@@ -567,6 +577,14 @@ option{background:var(--raised);color:var(--ceramic);}
   </div>
 </div>
 
+<div class="modal-bg" id="aiAnswerModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-title" id="aiAnswerTitle"></div>
+    <div id="aiAnswerBody"></div>
+    <div class="modal-actions" id="aiAnswerActions"></div>
+  </div>
+</div>
+
 <div class="modal-bg" id="entryEditModal">
   <div class="modal" style="max-width:480px;">
     <div class="modal-title" id="entryEditTitle">✏️ Fix entry</div>
@@ -630,7 +648,7 @@ async function api(method, path, body) {
 // ════════════════════════════════════════════════════════
 // UTILS
 // ════════════════════════════════════════════════════════
-function todayStr() { return new Date().toISOString().split('T')[0]; }
+function todayStr() { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function fmtDate(d) {
   if (!d) return '—';
   const s = String(d).substring(0,10);
@@ -645,6 +663,10 @@ function initials(name) { return name.split(' ').map(w=>w[0]).join('').slice(0,2
 function toast(msg, dur=2800) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.display = 'block';
+  // with a sheet open, float the toast at the top so it never covers the sheet's buttons
+  const sheetOpen = !!document.querySelector('.modal-bg.open');
+  t.style.top = sheetOpen ? 'calc(14px + env(safe-area-inset-top))' : 'auto';
+  t.style.bottom = sheetOpen ? 'auto' : '';
   clearTimeout(t._t); t._t = setTimeout(() => t.style.display='none', dur);
 }
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
@@ -775,8 +797,8 @@ function showPage(name) {
   document.getElementById('page-'+name).classList.add('active');
   // AI dock is the front door: full size on Add Items, compact on the Live Board
   const dock = document.getElementById('aiDock');
-  dock.style.display = (name==='addItems' || name==='liveBoard') ? 'block' : 'none';
-  document.getElementById('aiCard').classList.toggle('compact', name==='liveBoard');
+  dock.style.display = 'block';   // the mic is on every screen — full size on Add Items, compact elsewhere
+  document.getElementById('aiCard').classList.toggle('compact', name!=='addItems');
   if (name!=='addItems') document.getElementById('recentAdds').innerHTML = '';
   aiInit();
   document.querySelectorAll('.nav-btn').forEach(b=>{
@@ -931,7 +953,7 @@ function aiSetState(st) {
   b.classList.toggle('busy', st==='busy');
   b.disabled = st==='busy';
   document.getElementById('micIcon').innerHTML = st==='rec' ? MIC_STOP_SVG : st==='busy' ? '<span class="spinner"></span>' : MIC_SVG;
-  if (st==='idle') aiSetStatus('Tap and say what you had', '“Two coffee and one vada… one tea for Ravi”  ·  “my usual”');
+  if (st==='idle') aiSetStatus('Tap and tell me', '“Two coffee, one tea for Ravi”  ·  “Pay the bill”  ·  “What’s outstanding?”');
 }
 
 function aiMicTap() {
@@ -1007,7 +1029,7 @@ async function aiSendAudio(blob, type) {
   aiSetState('busy'); aiSetStatus('Understanding…','');
   try {
     const lang = document.getElementById('aiLang').value || 'auto';
-    const r = await fetch('/api/ai/voice?lang='+encodeURIComponent(lang), { method:'POST', headers:{ 'Content-Type': type.split(';')[0] }, body: blob });
+    const r = await fetch('/api/ai/voice?lang='+encodeURIComponent(lang)+'&today='+todayStr(), { method:'POST', headers:{ 'Content-Type': type.split(';')[0] }, body: blob });
     const d = await r.json().catch(()=>({}));
     if (!r.ok) {
       if (d.code==='NO_STT') { aiCaps.stt = false; }   // next tap will use on-device dictation instead
@@ -1047,7 +1069,7 @@ function aiSendText() {
 }
 async function aiParseText(text) {
   aiSetState('busy'); aiSetStatus('Understanding…','');
-  try { aiShowResult(await api('POST','/api/ai/text',{ text })); }
+  try { aiShowResult(await api('POST','/api/ai/text',{ text, today: todayStr() })); }
   catch(e) { toast('⚠️ '+e.message); }
   finally { aiSetState('idle'); }
 }
@@ -1056,6 +1078,7 @@ async function aiParseText(text) {
 // A line is either a menu item {item_id, qty, member_id, sure} or a NEW item
 // {isNew:true, name, rate, qty, member_id} that gets added to the menu on confirm.
 function aiShowResult(d) {
+  if (d.intent && d.intent !== 'order') return aiRunCommand(d);
   aiLines = (d.lines||[]).map(l=>({...l}));
   (d.new_items||[]).forEach(n => aiLines.push({ isNew:true, name:n.item_name, rate:n.rate, qty:n.qty, member_id:n.member_id }));
   aiMeta = { transcript: d.transcript || '', unmatched: d.unmatched || [] };
@@ -1261,6 +1284,213 @@ async function deleteEntry(id) {
   } catch(e) { toast('Error: '+e.message); }
 }
 
+
+
+// ════════════════════════════════════════════════════════
+// AI COMMANDS — everything you can say that isn't an order
+// The server only *classifies* what was said; every action below runs through the same
+// screens, permissions and confirmations as tapping. Money never moves on voice alone.
+// ════════════════════════════════════════════════════════
+const inr = n => '₹' + (Math.round(parseFloat(n||0)*100)/100).toLocaleString('en-IN');
+function aiAnswer(title, html, actions = [], heard = '') {
+  document.getElementById('aiAnswerTitle').textContent = title;
+  document.getElementById('aiAnswerBody').innerHTML = (heard ? `<div class="ans-heard">“${esc(heard)}”</div>` : '') + html;
+  const bar = document.getElementById('aiAnswerActions');
+  bar.innerHTML = '';
+  [...actions, { label:'Close', cls:'btn-ghost' }].forEach(a => {
+    const b = document.createElement('button'); b.className = 'btn ' + (a.cls || 'btn-primary'); b.textContent = a.label;
+    b.onclick = () => { closeModal('aiAnswerModal'); a.run && a.run(); }; bar.appendChild(b);
+  });
+  openModal('aiAnswerModal');
+}
+function aiRefreshPage() {
+  const on = n => document.getElementById('page-'+n).classList.contains('active');
+  if (on('liveBoard')) loadLiveBoard();
+  if (on('myTab')) loadMyTab();
+  if (on('addItems')) { renderQuickGrid(); loadTouched(); loadSessionStatus(); }
+  if (on('adminItems')) loadAdminItems();
+}
+const aiNeedAdmin = what => { if (currentUser.isAdmin) return true; toast(`Only the admin can ${what}`); return false; };
+const aiItem = id => allItems.find(i => i.id === id);
+const aiMemberName = id => (aiMembers.find(m => m.id === id) || {}).name || '';
+
+const AI_EXAMPLES = [
+  ['Order', ['Two coffee and one vada', 'One tea for Ravi', 'Masala dosa fifty rupees', 'My usual']],
+  ['Bill & payment', ['What’s outstanding?', 'Show the bill', 'Pay the bill', 'Pay half', 'Ravi paid 300', 'Settle using advance', 'How much advance do we have?']],
+  ['My tab & fixes', ['How much do I owe?', 'What did Ravi have?', 'Remove my vada', 'Undo that', 'Make my coffee two']],
+  ['Look things up', ['Report for this month', 'How much did we spend last week?', 'Open history', 'Show yesterday’s bill']],
+  ['Admin', ['Change tea rate to 12', 'Add samosa to the menu at 15', 'Remove samosa from the menu', 'Reopen the round']],
+];
+function aiHelp(heard, title = 'Things you can say') {
+  const html = AI_EXAMPLES.filter(([g]) => g !== 'Admin' || currentUser.isAdmin).map(([g, egs]) =>
+    `<div class="ans-group">${g}</div>` + egs.map(e => `<button class="ans-eg" onclick="closeModal('aiAnswerModal');aiSource='text';aiParseText(this.textContent)">${esc(e)}</button>`).join('')).join('');
+  aiAnswer(title, html, [{ label:'Try again', cls:'btn-primary', run: aiRetry }], heard);
+}
+
+async function aiRunCommand(d) {
+  const a = d.args || {}, heard = d.transcript || '';
+  try {
+    switch (d.intent) {
+      case 'show_bill':        return a.scope === 'outstanding' ? aiOutstanding(heard) : aiShowBill(a, heard);
+      case 'pay':              return aiPay(a, heard);
+      case 'my_tab':           if (a.date) document.getElementById('myTabDate').value = a.date; return showPage('myTab');
+      case 'member_tab':       return aiMemberTab(a, heard);
+      case 'remove_entry':     return aiRemoveEntry(a, heard);
+      case 'change_qty':       return aiChangeQty(a, heard);
+      case 'navigate':
+        if ((a.page === 'members' || a.page === 'adminItems') && !aiNeedAdmin('open that screen')) return;
+        return showPage(a.page);
+      case 'report':
+        if (a.from) document.getElementById('reportFrom').value = a.from;
+        if (a.to)   document.getElementById('reportTo').value   = a.to;
+        return showPage('report');
+      case 'advance':          return showAdvanceLedger();
+      case 'set_rate':         return aiSetMenuRate(a);
+      case 'add_menu_item':    return aiAddMenuItem(a);
+      case 'remove_menu_item': return aiRemoveMenuItem(a);
+      case 'reopen_round':     return aiReopen(a, heard);
+      case 'logout':           return confirm('Sign out?', 'You’ll need your PIN to get back in.', logout, 'Sign out', 'btn-danger');
+      case 'help':             return aiHelp('');
+      default:                 return aiHelp(heard, 'I didn’t get that');
+    }
+  } catch (e) { toast('⚠️ ' + e.message); }
+}
+
+// ── bill & payment ──
+async function aiShowBill(a, heard) {
+  const date = a.date || aiActiveDate();
+  const t = await api('GET', `/api/tab/all?date=${date}`);
+  if (t.session && t.entryCount) return openBillModal(t.session.id);
+  if (!a.date) return aiOutstanding(heard);           // nothing today → show whatever is still unpaid
+  aiAnswer('No bill that day', `<p class="text-muted">Nothing was added on ${fmtDate(date)}.</p>`, [], heard);
+}
+let aiRoundArgs = {};
+function aiRoundRows(rounds, args) {
+  aiRoundArgs = args || {};
+  return rounds.map(r => `<div class="ans-row"><div><div class="bold">${fmtDate(r.date)} · Round ${r.round_no}</div>
+      <div class="text-muted">${r.paid > 0 ? inr(r.paid)+' paid of '+inr(r.total) : 'Bill '+inr(r.total)}</div></div>
+      <div class="flex gap-8" style="align-items:center;"><span class="amt">${inr(r.pending)}</span>
+      <button class="btn btn-primary btn-sm" onclick="closeModal('aiAnswerModal');aiOpenPay(${r.id},aiRoundArgs)">${args ? 'Pay' : 'View'}</button></div></div>`).join('');
+}
+async function aiOutstanding(heard) {
+  const o = await api('GET', '/api/outstanding');
+  const adv = o.advanceBalance > 0 ? `<p class="text-muted" style="margin-top:12px;">💳 ${inr(o.advanceBalance)} advance credit on hand</p>` : '';
+  if (!o.rounds.length) return aiAnswer('Nothing outstanding', `<div class="ans-big">₹0</div><p class="text-muted" style="margin-top:6px;">Every round is settled.</p>${adv}`, [], heard);
+  aiAnswer('Outstanding with the shop',
+    `<div class="ans-big">${inr(o.totalPending)}</div><p class="text-muted" style="margin:4px 0 6px;">across ${o.rounds.length} round${o.rounds.length>1?'s':''}</p>${aiRoundRows(o.rounds, null)}${adv}`,
+    o.rounds.length === 1 ? [{ label:'Pay now', run: () => aiOpenPay(o.rounds[0].id, {}) }] : [], heard);
+}
+async function aiPay(a, heard) {
+  if (a.date) {
+    const t = await api('GET', `/api/tab/all?date=${a.date}`);
+    if (!t.session || !t.entryCount) return aiAnswer('Nothing to pay', `<p class="text-muted">No bill on ${fmtDate(a.date)}.</p>`, [], heard);
+    return aiOpenPay(t.session.id, a);
+  }
+  const o = await api('GET', '/api/outstanding');
+  if (!o.rounds.length) {
+    if (a.amount) {   // "Ravi paid 300" with nothing pending → it becomes advance credit on the latest round
+      const t = await api('GET', `/api/tab/all?date=${aiActiveDate()}`);
+      if (t.session && t.entryCount) return aiOpenPay(t.session.id, a);
+    }
+    return aiAnswer('Nothing to pay', `<div class="ans-big">₹0</div><p class="text-muted" style="margin-top:6px;">Every round is already settled.</p>`, [], heard);
+  }
+  if (o.rounds.length === 1) return aiOpenPay(o.rounds[0].id, a);
+  aiAnswer('Which round?', `<p class="text-muted">${inr(o.totalPending)} is pending across ${o.rounds.length} rounds. Pick one to pay.</p>${aiRoundRows(o.rounds, a)}`, [], heard);
+}
+// Opens the normal bill sheet, pre-filled from what was said. The person still taps Confirm Payment.
+async function aiOpenPay(sessionId, a) {
+  a = a || {};
+  await openBillModal(sessionId);
+  const amt = document.getElementById('payAmountInput');
+  if (a.payer_name) document.getElementById('payerNameInput').value = a.payer_name;
+  if (a.amount) amt.value = a.amount; else if (a.fraction === 'half') fillPayAmount('half'); else if (a.fraction === 'full') fillPayAmount('full');
+  if (a.use_advance) return toast(advanceAvailable > 0 && pendingBillAmount > 0 ? `Tap “Use Advance” to apply ${inr(Math.min(advanceAvailable, pendingBillAmount))}` : 'No advance credit to use right now');
+  if (a.amount || a.fraction || a.payer_name || Object.keys(a).length) toast(pendingBillAmount > 0 ? `Check ${inr(amt.value)} and tap Confirm Payment` : 'This round is already paid');
+  document.getElementById('payNowBtn').scrollIntoView({ behavior:'smooth', block:'end' });
+}
+
+// ── tabs ──
+async function aiMemberTab(a, heard) {
+  const date = a.date || aiActiveDate(), name = aiMemberName(a.member_id);
+  const t = await api('GET', `/api/tab/all?date=${date}`);
+  const m = t.byMember && t.byMember[name];
+  if (!m) return aiAnswer(`${name}’s tab`, `<p class="text-muted">Nothing for ${esc(name)} on ${fmtDate(date)}${t.session?` (Round ${t.session.round_no})`:''}.</p>`, [], heard);
+  const g = {}; m.entries.forEach(e => { (g[e.item_name] = g[e.item_name] || { q:0, amt:0 }); g[e.item_name].q += e.qty; g[e.item_name].amt += parseFloat(e.amount); });
+  aiAnswer(`${name}’s tab`, `<div class="ans-big">${inr(m.total)}</div><p class="text-muted" style="margin:4px 0 8px;">${fmtDate(date)} · Round ${t.session.round_no}</p>` +
+    Object.entries(g).map(([n, v]) => `<div class="item-summary-row"><span>${esc(n)} <span style="color:var(--muted)">×${v.q}</span></span><span class="bold">${inr(v.amt)}</span></div>`).join(''), [], heard);
+}
+// Lines on the open round that this person is allowed to fix, newest first
+async function aiFixable(a) {
+  const t = await api('GET', `/api/tab/all?date=${aiActiveDate()}`);
+  if (!t.session) return { locked:false, list:[] };
+  if (t.session.status !== 'open') return { locked:true, list:[], session:t.session };
+  let list = Object.values(t.byMember).flatMap(m => m.entries).filter(canTouch);
+  if (a.member_id) list = list.filter(e => e.member_id === a.member_id);
+  else if (!currentUser.isAdmin || !a.item_id) list = list.filter(e => e.member_id === currentUser.memberId || e.added_by === currentUser.memberId);
+  if (a.item_id) list = list.filter(e => e.item_id === a.item_id);
+  list.sort((x, y) => new Date(y.added_at) - new Date(x.added_at));
+  return { locked:false, list };
+}
+async function aiRemoveEntry(a, heard) {
+  const { locked, list } = await aiFixable(a);
+  if (locked) return aiAnswer('Round is locked', `<p class="text-muted">Payment has started on this round, so lines can’t be removed${currentUser.isAdmin?'. Reopen the round first.':' — ask the admin to reopen it.'}</p>`, [], heard);
+  if (!list.length) return aiAnswer('Nothing to remove', `<p class="text-muted">I couldn’t find ${a.item_id ? 'that item' : 'anything you added'} on the open round.</p>`, [], heard);
+  const picks = a.which === 'all' ? list : [list[0]];
+  if (picks.length > 1) { picks.forEach(e => boardEntries[e.id] = e); return openEntryEditor(picks.map(e => e.id)); }
+  const e = picks[0];
+  confirm('Remove this line?', `${e.item_name} ×${e.qty} — ${inr(e.amount)}${e.member_id!==currentUser.memberId?' ('+e.member_name+')':''}`, async () => {
+    try { await api('DELETE', `/api/tab/${e.id}`); toast('Removed'); aiRefreshPage(); } catch (err) { toast('Error: ' + err.message); }
+  }, 'Remove', 'btn-danger');
+}
+async function aiChangeQty(a, heard) {
+  const { locked, list } = await aiFixable(a);
+  if (locked) return aiAnswer('Round is locked', `<p class="text-muted">Payment has started on this round, so it can’t be edited.</p>`, [], heard);
+  if (!list.length) return aiAnswer('Couldn’t find it', `<p class="text-muted">${esc((aiItem(a.item_id)||{}).name||'That item')} isn’t on the open round for you.</p>`, [], heard);
+  const e = list[0];
+  if (e.qty === a.qty) return toast(`${e.item_name} is already ×${a.qty}`);
+  confirm('Change quantity?', `${e.item_name}: ×${e.qty} → ×${a.qty}  (${inr(parseFloat(e.rate)*a.qty)})`, async () => {
+    try { await api('PUT', `/api/tab/${e.id}`, { qty:a.qty }); toast('Updated'); aiRefreshPage(); } catch (err) { toast('Error: ' + err.message); }
+  }, 'Change', 'btn-primary');
+}
+
+// ── admin: menu & rounds ──
+function aiSetMenuRate(a) {
+  if (!aiNeedAdmin('change menu rates')) return;
+  const it = aiItem(a.item_id); if (!it) return toast('That item isn’t on the menu');
+  confirm('Change rate?', `${it.name}: ${inr(it.rate)} → ${inr(a.rate)}. Lines on the open round update too.`, async () => {
+    try { await api('PUT', `/api/items/${it.id}`, { name:it.name, rate:a.rate, is_active:true }); allItems = await api('GET','/api/items'); toast(`${it.name} is now ${inr(a.rate)}`); aiRefreshPage(); }
+    catch (err) { toast('Error: ' + err.message); }
+  }, 'Change', 'btn-primary');
+}
+function aiAddMenuItem(a) {
+  if (!aiNeedAdmin('add menu items')) return;
+  if (!a.rate) {     // no price said → finish it on the Items screen with the name filled in
+    showPage('adminItems');
+    document.getElementById('newItemName').value = a.name;
+    const r = document.getElementById('newItemRate'); r.value = ''; r.focus();
+    return toast(`Enter the rate for ${a.name}`);
+  }
+  confirm('Add to menu?', `${a.name} — ${inr(a.rate)}`, async () => {
+    try { await api('POST', '/api/items/quick', { name:a.name, rate:a.rate }); allItems = await api('GET','/api/items'); toast(`${a.name} added to the menu`); aiRefreshPage(); }
+    catch (err) { toast('Error: ' + err.message); }
+  }, 'Add', 'btn-primary');
+}
+function aiRemoveMenuItem(a) {
+  if (!aiNeedAdmin('remove menu items')) return;
+  const it = aiItem(a.item_id); if (!it) return toast('That item isn’t on the menu');
+  confirm('Remove from menu?', `${it.name} (${inr(it.rate)}). Lines already on a tab are kept.`, async () => {
+    try { await api('DELETE', `/api/items/${it.id}`); allItems = await api('GET','/api/items'); toast(`${it.name} removed from the menu`); aiRefreshPage(); }
+    catch (err) { toast('Error: ' + err.message); }
+  }, 'Remove', 'btn-danger');
+}
+async function aiReopen(a, heard) {
+  if (!aiNeedAdmin('reopen a round')) return;
+  const rounds = await api('GET', `/api/sessions/by-date?date=${a.date || aiActiveDate()}`);
+  const last = rounds[rounds.length - 1];
+  if (!last) return aiAnswer('No round that day', `<p class="text-muted">There’s nothing to reopen.</p>`, [], heard);
+  if (last.status === 'open') return toast(`Round ${last.round_no} is already open`);
+  reopenSession(last.id);
+}
 
 // ════════════════════════════════════════════════════════
 // FIX MISTAKES — edit / delete tab lines
@@ -1785,13 +2015,8 @@ async function loadHistory() {
 
 function viewHistorySession(date, sessionId) {
   preselectSessionId = sessionId;
-  if (currentUser && currentUser.isAdmin) {
-    document.getElementById('boardDate').value = date;
-    showPage('liveBoard');
-  } else {
-    document.getElementById('myTabDate').value = date;
-    showPage('myTab');
-  }
+  document.getElementById('boardDate').value = date;
+  showPage('liveBoard');
 }
 
 // ════════════════════════════════════════════════════════

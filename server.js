@@ -575,6 +575,24 @@ app.post('/api/tab/apply-advance', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Everyone: every round that still has money pending, any date — powers "see the outstanding bill" / "pay the bill"
+app.get('/api/outstanding', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ds.id, ds.date, ds.round_no, ds.status,
+              COALESCE(te.total,0) as total, COALESCE(sp.paid,0) as paid,
+              GREATEST(COALESCE(te.total,0) - COALESCE(sp.paid,0), 0) as pending
+       FROM daily_sessions ds
+       LEFT JOIN (SELECT session_id, SUM(amount) as total FROM tab_entries GROUP BY session_id) te ON te.session_id = ds.id
+       LEFT JOIN (SELECT session_id, SUM(amount) as paid  FROM session_payments GROUP BY session_id) sp ON sp.session_id = ds.id
+       WHERE COALESCE(te.total,0) - COALESCE(sp.paid,0) > 0.009
+       ORDER BY ds.date, ds.round_no`);
+    const rounds = rows.map(r => ({ ...r, date: dateStr(r.date), total: parseFloat(r.total), paid: parseFloat(r.paid), pending: parseFloat(r.pending) }));
+    const totalPending = Math.round(rounds.reduce((s, r) => s + r.pending, 0) * 100) / 100;
+    res.json({ rounds, totalPending, advanceBalance: await getAdvanceBalance() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Everyone: current advance balance + recent ledger history
 app.get('/api/advance', auth, async (req, res) => {
   try {
@@ -712,7 +730,7 @@ function aiLimit(req, res, next) {
 }
 
 // Everything the parser needs to know: menu, members, habits, the speaker's last order
-async function buildAiContext(user) {
+async function buildAiContext(user, today) {
   const [{ rows: items }, { rows: members }, { rows: usualRows }, { rows: lastRows }] = await Promise.all([
     pool.query('SELECT id,name,rate FROM items WHERE is_active=TRUE ORDER BY display_order,id'),
     pool.query('SELECT id,name FROM members WHERE is_active=TRUE ORDER BY name'),
@@ -733,7 +751,9 @@ async function buildAiContext(user) {
     if (!usuals[r.member_id]) usuals[r.member_id] = [];
     if (usuals[r.member_id].length < 3) usuals[r.member_id].push({ item_id: r.item_id });
   }
-  return { items, members, usuals, lastOrder: lastRows, speaker: { id: user.member_id, name: user.name } };
+  const okDay = /^\d{4}-\d{2}-\d{2}$/.test(today || '') ? today : new Date().toISOString().split('T')[0];
+  return { items, members, usuals, lastOrder: lastRows, today: okDay,
+           speaker: { id: user.member_id, name: user.name, is_admin: !!user.is_admin } };
 }
 
 app.get('/api/ai/status', auth, (req, res) => res.json(ai.status()));
@@ -743,7 +763,7 @@ app.post('/api/ai/text', auth, aiLimit, async (req, res) => {
   try {
     const text = String(req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Say or type what you had' });
-    res.json(await ai.parseText(text, await buildAiContext(req.user)));
+    res.json(await ai.parseText(text, await buildAiContext(req.user, req.body.today)));
   } catch (e) { console.error('AI text error:', e.message); res.status(500).json({ error: 'Could not understand that — try again' }); }
 });
 
@@ -755,7 +775,7 @@ app.post('/api/ai/voice', auth, aiLimit,
       if (!Buffer.isBuffer(req.body) || req.body.length < 800)
         return res.status(400).json({ error: "Didn't catch anything — hold the mic a little longer" });
       const lang = ['auto', 'en', 'kn', 'hi'].includes(req.query.lang) ? req.query.lang : 'auto';
-      const out = await ai.parseAudio(req.body, req.headers['content-type'], await buildAiContext(req.user), lang);
+      const out = await ai.parseAudio(req.body, req.headers['content-type'], await buildAiContext(req.user, req.query.today), lang);
       res.json(out);
     } catch (e) {
       console.error('AI voice error:', e.message, e.detail || '');

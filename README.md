@@ -116,6 +116,26 @@ Fallback chain: Groq → Gemini → built-in rules. AI output is never written d
 Any member can *add* a missing item this way (`POST /api/items/quick`, max 15/day, records `created_by`);
 editing rates and removing items stays admin-only under **Items**. Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
 
+### 🗣️ Voice commands (not just orders)
+The mic is on every screen and understands commands as well as orders — say it or type it:
+
+| Say | What happens |
+|---|---|
+| "What's outstanding?" / "how much is pending" | Total still owed to the shop across all unpaid rounds, each with View/Pay |
+| "Show the bill" / "yesterday's bill" | Opens that round's bill |
+| "Pay the bill" / "pay half" / "pay 200" / "Ravi paid 300" / "settle using advance" | Opens the bill with payer and amount pre-filled — **you still tap Confirm Payment** |
+| "How much do I owe?" / "What did Ravi have?" | My Tab / that member's lines and total |
+| "Remove my vada" / "undo that" / "make my coffee two" | Finds the line on the open round and asks to confirm |
+| "Report for this month" / "how much did we spend last week" | Opens the report for that range |
+| "How much advance do we have?" | Advance credit ledger |
+| "Open history / members / items" | Goes there |
+| Admin: "change tea rate to 12", "add samosa to the menu at 15", "remove samosa from the menu", "reopen the round" | Each asks to confirm |
+| "What can you do?" | Tappable list of examples |
+
+The AI only *classifies* what was said (`intent` + `args`, validated server-side). The action then runs through the
+same screens, permissions and confirmations as tapping — voice never moves money or deletes anything on its own.
+Without AI keys a keyword fallback covers the common commands.
+
 ### ✏️ Fixing mistakes
 - **Live Board is home for everyone** (members and admin), with the AI mic on top.
 - Any line can be fixed while the round is **open**: tap ✏️ to change qty, swap the item, move it to another

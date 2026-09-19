@@ -72,8 +72,39 @@ ${members}
 SPEAKER: id ${ctx.speaker.id} (${ctx.speaker.name})
 SPEAKER'S LAST ORDER: ${last}
 
-RULES
-- Output ONLY JSON: {"lines":[{"item_id":<int>,"qty":<int>,"member_id":<int>,"sure":<bool>,"heard":"<words you matched>"}],"new_items":[{"name":"<Clean Item Name>","qty":<int>,"member_id":<int>,"rate":<number|null>}],"unmatched":["<phrase>"]}
+STEP 1 — decide the INTENT. The speaker is either ordering food/drink or giving the app a command.
+TODAY is ${ctx.today}. Resolve spoken dates ("yesterday", "on the 15th", "last Friday") to YYYY-MM-DD; omit/null when no date was said.
+The speaker ${ctx.speaker.is_admin ? 'IS' : 'is NOT'} the admin.
+
+Output ONLY JSON: {"intent":"<one of below>","args":{...},"lines":[],"new_items":[],"unmatched":[]}
+
+INTENTS and their args (use null for anything not said):
+- "order"            they had / want food or drink → fill lines / new_items per ORDER RULES. args {}
+- "show_bill"        see the bill, total, how much is pending/outstanding/due/unpaid/baaki. args {"scope":"outstanding"|"round","date":null}
+                     scope "outstanding" when they say outstanding / pending / due / unpaid / baaki / "how much do we owe"; else "round".
+- "pay"              pay / settle / clear the bill, or record that someone paid ("Ravi paid 300", "I gave 200 to the shop", "pay half", "settle using advance").
+                     args {"amount":<number|null>,"fraction":"full"|"half"|null,"payer_member_id":<id|null>,"payer_name":<string|null>,"use_advance":<bool>,"date":null}
+- "my_tab"           what did I have / my tab / how much is mine. args {"date":null}
+- "member_tab"       what did <member> have / <member>'s total. args {"member_id":<id>,"date":null}
+- "remove_entry"     undo / cancel / remove / delete something already added to the tab ("remove my vada", "undo that", "cancel last one", "delete Ravi's tea").
+                     args {"item_id":<id|null>,"member_id":<id|null>,"which":"last"|"all"|null}
+- "change_qty"       correct a quantity already on the tab ("make my coffee two", "change vada to 3"). args {"item_id":<id>,"qty":<int>,"member_id":<id|null>}
+- "navigate"         open a screen. args {"page":"liveBoard"|"addItems"|"myTab"|"history"|"report"|"members"|"adminItems"}
+- "report"           spending report / how much did we spend over a period. args {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} ("this month", "last week", "September" → real dates)
+- "advance"          advance / credit balance with the shop. args {}
+- "set_rate"         change a MENU price ("make tea 12 rupees", "coffee rate 25"). args {"item_id":<id>,"rate":<number>}
+- "add_menu_item"    add something to the MENU without ordering it ("add samosa to the menu at 15"). args {"name":"<Title Case>","rate":<number|null>}
+- "remove_menu_item" take something off the MENU. args {"item_id":<id>}
+- "reopen_round"     reopen a paid/locked round. args {"date":null}
+- "help"             what can you do / how does this work. args {}
+- "logout"           sign out / log out. args {}
+- "unknown"          none of the above; put what you heard in "unmatched".
+"Pay the bill" is ALWAYS intent "pay", "see the outstanding bill" is ALWAYS "show_bill" — never an order, never unknown.
+Removing from the TAB (remove_entry) ≠ removing from the MENU (remove_menu_item): "remove my coffee" is the tab; "remove coffee from the menu" is the menu.
+
+STEP 2 — only for intent "order", follow the ORDER RULES.
+ORDER RULES
+- lines / new_items / unmatched shapes: {"lines":[{"item_id":<int>,"qty":<int>,"member_id":<int>,"sure":<bool>,"heard":"<words you matched>"}],"new_items":[{"name":"<Clean Item Name>","qty":<int>,"member_id":<int>,"rate":<number|null>}],"unmatched":["<phrase>"]}
 - First SEARCH the MENU carefully: match by meaning, spelling variants and mishearings ("masalah dosa" = "Masala Dosa", "idly" = "Idli", "wada" = "Vada"). item_id MUST be an id from MENU — never invent ids.
 - If a real food or drink was ordered that is genuinely NOT on the MENU, put it in "new_items" so it can be added to the menu: give a clean, correctly spelled, Title Case name (e.g. "Masala Dosa", "Lemon Tea"), its qty and member_id, and "rate" ONLY if the speaker said a price ("masala dosa fifty rupees" → 50), else null. Never guess a rate.
 - "unmatched" is only for words you could not understand at all. Not for food items.
@@ -323,21 +354,112 @@ function validate(raw, ctx) {
   return { lines: [...merged.values()], new_items: [...newMerged.values()], unmatched };
 }
 
+
+// ── commands (everything that is not an order) ──────────────────
+const INTENTS = new Set(['order','show_bill','pay','my_tab','member_tab','remove_entry','change_qty','navigate','report',
+  'advance','set_rate','add_menu_item','remove_menu_item','reopen_round','help','logout','unknown']);
+const PAGES = new Set(['liveBoard','addItems','myTab','history','report','members','adminItems']);
+const isDate = d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d));
+
+function validateCommand(raw, ctx) {
+  let intent = INTENTS.has(raw?.intent) ? raw.intent : 'order';
+  const a = (raw && typeof raw.args === 'object' && raw.args) || {};
+  const itemIds = new Set(ctx.items.map(i => Number(i.id))), memIds = new Set(ctx.members.map(m => Number(m.id)));
+  const item = v => itemIds.has(Number(v)) ? Number(v) : null;
+  const mem  = v => memIds.has(Number(v)) ? Number(v) : null;
+  const num  = (v, max) => { const n = parseFloat(v); return Number.isFinite(n) && n > 0 && n <= max ? Math.round(n * 100) / 100 : null; };
+  const date = v => isDate(v) ? v : null;
+  let args = {};
+  switch (intent) {
+    case 'show_bill':   args = { scope: a.scope === 'outstanding' ? 'outstanding' : 'round', date: date(a.date) }; break;
+    case 'pay':         args = { amount: num(a.amount, 1e6), fraction: ['full','half'].includes(a.fraction) ? a.fraction : null,
+                                 payer_member_id: mem(a.payer_member_id), payer_name: a.payer_name ? tidyName(a.payer_name).slice(0, 40) : null,
+                                 use_advance: a.use_advance === true, date: date(a.date) };
+                        if (args.payer_member_id) args.payer_name = ctx.members.find(m => Number(m.id) === args.payer_member_id).name;
+                        break;
+    case 'my_tab':      args = { date: date(a.date) }; break;
+    case 'member_tab':  args = { member_id: mem(a.member_id), date: date(a.date) }; if (!args.member_id) intent = 'my_tab'; break;
+    case 'remove_entry':args = { item_id: item(a.item_id), member_id: mem(a.member_id), which: ['last','all'].includes(a.which) ? a.which : null }; break;
+    case 'change_qty':  { const q = parseInt(a.qty, 10); args = { item_id: item(a.item_id), qty: q >= 1 && q <= MAX_QTY ? q : null, member_id: mem(a.member_id) };
+                          if (!args.item_id || !args.qty) intent = 'unknown'; } break;
+    case 'navigate':    args = { page: PAGES.has(a.page) ? a.page : null }; if (!args.page) intent = 'unknown'; break;
+    case 'report':      args = { from: date(a.from), to: date(a.to) }; if (args.from && args.to && args.from > args.to) [args.from, args.to] = [args.to, args.from]; break;
+    case 'set_rate':    args = { item_id: item(a.item_id), rate: num(a.rate, 5000) }; if (!args.item_id || !args.rate) intent = 'unknown'; break;
+    case 'add_menu_item': args = { name: tidyName(a.name), rate: num(a.rate, 5000) }; if (args.name.length < 2) intent = 'unknown'; break;
+    case 'remove_menu_item': args = { item_id: item(a.item_id) }; if (!args.item_id) intent = 'unknown'; break;
+    case 'reopen_round': args = { date: date(a.date) }; break;
+    default: args = {};
+  }
+  return { intent, args };
+}
+
+// Keyword intent detection for when no LLM is reachable. Conservative: anything unsure stays an order.
+function ruleIntent(text, ctx) {
+  const t = ' ' + String(text).toLowerCase().replace(/[^a-z0-9₹\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  const has = re => re.test(t);
+  const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = isDate(ctx.today) ? new Date(ctx.today + 'T12:00:00') : new Date();
+  const day = has(/ yesterday | nenne | kal /) ? ymd(new Date(today.getTime() - 864e5)) : null;
+  const member = () => { for (const m of ctx.members) { const f = m.name.toLowerCase().split(/\s+/)[0]; if (f.length > 1 && t.includes(' ' + f + ' ')) return m; } return null; };
+  const itemIn = () => { let best = null, n = 0; for (const i of ctx.items) { const tk = tokenize(cleanItemName(i.name)); const sh = tk.filter(x => tokenize(t).includes(x)).length; if (sh > n || (sh === n && sh && tk.length === sh)) { best = i; n = sh; } } return best; };
+  const amt = () => { const m = t.match(/(?:₹|rs|rupees)?\s*(\d+(?:\.\d+)?)\s*(?:rs|rupees|rupee|bucks)?/); return m ? parseFloat(m[1]) : null; };
+
+  if (has(/ (what can you do|help|how (do|does) (i|this|it) )/)) return { intent: 'help', args: {} };
+  if (has(/ (sign|log) ?out /)) return { intent: 'logout', args: {} };
+  if (has(/ reopen /)) return { intent: 'reopen_round', args: { date: day } };
+  if (has(/ (advance|credit) /) && !has(/ (pay|settle|use|using|apply) /)) return { intent: 'advance', args: {} };
+  if (has(/ menu /) && has(/ (remove|delete|take off) /)) { const i = itemIn(); if (i) return { intent: 'remove_menu_item', args: { item_id: i.id } }; }
+  if (has(/ (rate|price) /) && has(/ (change|make|set|update|to) /)) { const i = itemIn(), r = amt(); if (i && r) return { intent: 'set_rate', args: { item_id: i.id, rate: r } }; }
+  if (has(/ (paid|pay|settle|clear|payment) /)) {
+    const m = member();
+    return { intent: 'pay', args: { amount: amt(), fraction: has(/ half /) ? 'half' : has(/ (full|fully|everything|all) /) ? 'full' : null,
+      payer_member_id: m ? m.id : null, payer_name: m ? m.name : null, use_advance: has(/ (advance|credit) /), date: day } };
+  }
+  if (has(/ (outstanding|pending|due|dues|unpaid|baaki|baki|owe) /) && !has(/ (i|my|mine) /)) return { intent: 'show_bill', args: { scope: 'outstanding', date: null } };
+  if (has(/ (my tab|my total|my bill|mine|do i owe|did i (have|take|order)) /)) return { intent: 'my_tab', args: { date: day } };
+  if (has(/ (bill|total|tab) /)) { const m = member(); return m && has(/ (s|his|her|have|had|total|tab) /) && !has(/ (the bill|show bill|see bill) /) ? { intent: 'member_tab', args: { member_id: m.id, date: day } } : { intent: 'show_bill', args: { scope: 'round', date: day } }; }
+  if (has(/ what (did|has|have) /)) { const m = member(); return m ? { intent: 'member_tab', args: { member_id: m.id, date: day } } : { intent: 'my_tab', args: { date: day } }; }
+  if (has(/ (undo|remove|delete|cancel|scratch) /)) { const i = itemIn(), m = member(); return { intent: 'remove_entry', args: { item_id: i ? i.id : null, member_id: m ? m.id : null, which: has(/ all /) ? 'all' : 'last' } }; }
+  if (has(/ (report|spent|spend|spending|expense|expenses) /)) {
+    let from = null, to = ymd(today);
+    if (has(/ this month /)) from = ymd(new Date(today.getFullYear(), today.getMonth(), 1));
+    else if (has(/ last month /)) { from = ymd(new Date(today.getFullYear(), today.getMonth() - 1, 1)); to = ymd(new Date(today.getFullYear(), today.getMonth(), 0)); }
+    else if (has(/ (this|last|past) week /)) from = ymd(new Date(today.getTime() - 6 * 864e5));
+    else if (has(/ today /)) from = to;
+    return { intent: 'report', args: { from, to: from ? to : null } };
+  }
+  const nav = [[/ (history|past (rounds|sessions)) /, 'history'], [/ members? /, 'members'], [/ (menu|items page|rates) /, 'adminItems'], [/ live board /, 'liveBoard'], [/ add items? /, 'addItems']];
+  if (has(/ (open|show|go to|goto|take me|see) /)) for (const [re, page] of nav) if (has(re)) return { intent: 'navigate', args: { page } };
+  if (has(/ (what|how|who|when|why|which) /)) return { intent: 'unknown', args: {}, unmatched: [String(text).trim()] };
+  return null;
+}
+
 // ── public API ──────────────────────────────────────────────────
+// Shape every engine's raw output the same way: an order (lines/new_items) or a command (intent/args)
+function finish(text, raw, ctx, engine) {
+  const cmd = validateCommand(raw, ctx);
+  const order = validate(raw, ctx);
+  // a model that said "unknown"/"order" but clearly produced order lines → it's an order
+  if ((cmd.intent === 'unknown') && (order.lines.length || order.new_items.length)) cmd.intent = 'order';
+  if (cmd.intent !== 'order' && cmd.intent !== 'unknown') return { transcript: text, intent: cmd.intent, args: cmd.args, lines: [], new_items: [], unmatched: [], engine };
+  return { transcript: text, intent: cmd.intent, args: {}, ...order, engine };
+}
+
 async function parseText(text, ctx) {
   text = String(text || '').trim().slice(0, 500);
-  if (!text) return { transcript: '', lines: [], new_items: [], unmatched: [], engine: 'none' };
+  if (!text) return { transcript: '', intent: 'unknown', args: {}, lines: [], new_items: [], unmatched: [], engine: 'none' };
   const errors = [];
   if (GROQ_KEY) {
-    try { return { transcript: text, ...validate(await groqParse(text, ctx), ctx), engine: 'groq' }; }
+    try { return finish(text, await groqParse(text, ctx), ctx, 'groq'); }
     catch (e) { errors.push(e.message); }
   }
   if (GEMINI_KEY) {
-    try { return { transcript: text, ...validate(await geminiParse(text, ctx), ctx), engine: 'gemini' }; }
+    try { return finish(text, await geminiParse(text, ctx), ctx, 'gemini'); }
     catch (e) { errors.push(e.message); }
   }
   if (errors.length) console.warn('AI parse fell back to rules:', errors.join(' | '));
-  return { transcript: text, ...validate(ruleParse(text, ctx), ctx), engine: 'rules' };
+  const cmd = ruleIntent(text, ctx);
+  return finish(text, cmd ? { ...cmd } : { intent: 'order', ...ruleParse(text, ctx) }, ctx, 'rules');
 }
 
 async function parseAudio(buffer, mime, ctx, lang) {
@@ -345,14 +467,14 @@ async function parseAudio(buffer, mime, ctx, lang) {
   if (GROQ_KEY) {
     try {
       const transcript = await groqTranscribe(buffer, mime, ctx, lang);
-      if (!transcript) return { transcript: '', lines: [], new_items: [], unmatched: [], engine: 'groq' };
+      if (!transcript) return { transcript: '', intent: 'unknown', args: {}, lines: [], new_items: [], unmatched: [], engine: 'groq' };
       return await parseText(transcript, ctx);
     } catch (e) { errors.push(e.message); }
   }
   if (GEMINI_KEY) {
     try {
       const raw = await geminiAudio(buffer, mime, ctx);
-      return { transcript: String(raw.transcript || '').slice(0, 500), ...validate(raw, ctx), engine: 'gemini' };
+      return finish(String(raw.transcript || '').slice(0, 500), raw, ctx, 'gemini');
     } catch (e) { errors.push(e.message); }
   }
   const err = new Error(errors.length ? 'Voice service is unavailable right now' : 'Voice AI is not configured on the server');
@@ -361,4 +483,4 @@ async function parseAudio(buffer, mime, ctx, lang) {
   throw err;
 }
 
-module.exports = { status, parseText, parseAudio, _ruleParse: ruleParse, _validate: validate };
+module.exports = { status, parseText, parseAudio, _ruleParse: ruleParse, _validate: validate, _ruleIntent: ruleIntent };
