@@ -25,8 +25,31 @@ pool.on('error', err => console.error('Pool error:', err.message));
 app.use(compression());
 app.use(express.json());
 app.use(cookieParser());
-// The service worker and manifest must never be served stale, or installs keep an old icon/version
-app.get(['/sw.js', '/manifest.webmanifest'], (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); });
+// ── PWA manifest with auto-versioned icon URLs ──
+// Chrome (144+) treats a manifest icon URL as immutable: an installed app only picks up a new icon
+// when the URL itself changes. So every icon src gets ?v=<hash of the file>. Swap a PNG in
+// public/icons, deploy, and installed phones are offered the new icon — nothing else to remember.
+const crypto = require('crypto');
+function buildManifest() {
+  const fs = require('fs');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'public/manifest.webmanifest'), 'utf8'));
+  const stamp = src => {
+    try {
+      const file = path.join(__dirname, 'public', src.split('?')[0]);
+      return `${src.split('?')[0]}?v=${crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex').slice(0, 10)}`;
+    } catch (_) { return src; }
+  };
+  const walk = icons => (icons || []).forEach(i => { i.src = stamp(i.src); });
+  walk(manifest.icons);
+  (manifest.shortcuts || []).forEach(sc => walk(sc.icons));
+  return JSON.stringify(manifest);
+}
+const MANIFEST_JSON = buildManifest();   // icons only change on deploy, so compute once at boot
+app.get('/manifest.webmanifest', (req, res) => {
+  res.set({ 'Content-Type': 'application/manifest+json; charset=utf-8', 'Cache-Control': 'no-cache' }).send(MANIFEST_JSON);
+});
+// The service worker must never be served stale either
+app.get('/sw.js', (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── DB INIT with retry ──

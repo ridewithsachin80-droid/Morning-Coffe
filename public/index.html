@@ -597,7 +597,13 @@ option{background:var(--raised);color:var(--ceramic);}
 
 <script>
 // PWA: register the service worker so Android installs this as a real app (own icon, no Chrome badge)
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+if ('serviceWorker' in navigator) window.addEventListener('load', async () => {
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    // Every time the app comes back to the foreground, check for a new version
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(()=>{}); });
+  } catch (e) {}
+});
 // ════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════

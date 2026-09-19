@@ -2,7 +2,7 @@
 // and keeps the shell openable on a flaky connection.
 // Network-first everywhere, so a new deploy is picked up immediately; the cache is only a fallback.
 // /api is never touched: money data must always be live.
-const CACHE = 'morning-coffee-v2';
+const CACHE = 'morning-coffee-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', e => {

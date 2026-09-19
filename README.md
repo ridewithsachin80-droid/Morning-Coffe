@@ -61,7 +61,15 @@ installs it as a real app instead of a bookmark-style shortcut.
 2. Open the site in Chrome → ⋮ → **Install app** (not "Add shortcut" / "Create shortcut").
 3. iPhone: Safari → Share → **Add to Home Screen**.
 
-To change the icon later: replace `public/icons/icon.svg`, regenerate the PNGs, and bump `CACHE` in `public/sw.js`.
+**Changing the icon later:** replace the PNGs in `public/icons/` (and `icon.svg`) and deploy. The server stamps
+every manifest icon URL with a hash of the file (`?v=…`), which is what makes Chrome notice the change.
+
+**How installed phones get it (Android/Chrome):** the next time the app is opened Chrome re-reads the manifest,
+sees new icon URLs and queues the update. Because an icon is part of the app's identity, Chrome asks the user to
+confirm it once ("Review app update" / update dialog) — a website cannot skip that step. It is applied after the
+app is closed. Old *shortcuts* (grey letter icon with a Chrome badge) are bookmarks, not installs — they never
+update and must be removed and re-installed. iPhone never refreshes a home-screen icon; remove and re-add.
+The app's code and screens need none of this — they are always the latest version on every open.
 
 ---
 
