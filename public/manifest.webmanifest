@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "Morning Coffee — UpScale",
+  "short_name": "Coffee",
+  "description": "Office coffee tab: say what you had, split the bill, pay the shop.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0B0E",
+  "theme_color": "#3d1f0a",
+  "lang": "en-IN",
+  "categories": ["food", "finance", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png",     "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png",     "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Add items", "short_name": "Add", "url": "/?source=pwa&page=addItems",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs>
+    <!-- UpScale Signature Gradient -->
+    <linearGradient id="upscaleGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7B2CBF" />
+      <stop offset="45%" stop-color="#4895EF" />
+      <stop offset="100%" stop-color="#4CC9F0" />
+    </linearGradient>
+
+    <!-- Sleek Glass/White Accents -->
+    <linearGradient id="cupOutline" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.6" />
+    </linearGradient>
+  </defs>
+<rect width="512" height="512" fill="#0A0B0E"/>
+<g transform="translate(256 256) scale(0.88) translate(-262 -236)">
+
+  <!-- Dark Dark App Icon Background -->
+  
+
+  <!-- UpScale Coffee Steam / Upward Arrow -->
+  <g transform="translate(0, -15)">
+    <!-- Steam Rise Body -->
+    <path d="M 216 220 C 216 160, 240 140, 240 95 C 240 80, 256 80, 256 95 L 256 120" 
+          fill="none" stroke="url(#upscaleGrad)" stroke-width="32" stroke-linecap="round" />
+    
+    <!-- UpScale Signature Arrowhead -->
+    <path d="M 220 115 L 256 70 L 292 115" 
+          fill="none" stroke="url(#upscaleGrad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+  <!-- Modern Sleek Coffee Cup (White, minimalist) -->
+  <g transform="translate(0, 20)">
+    <!-- Cup Body -->
+    <path d="M 166 240 L 186 360 C 190 395, 322 395, 326 360 L 346 240 Z" 
+          fill="none" stroke="url(#cupOutline)" stroke-width="24" stroke-linejoin="round" stroke-linecap="round" />
+
+    <!-- Cup Rim -->
+    <ellipse cx="256" cy="240" rx="90" ry="18" 
+             fill="#0A0B0E" stroke="url(#cupOutline)" stroke-width="20" />
+
+    <!-- Handle -->
+    <path d="M 340 260 C 395 260, 395 335, 334 345" 
+          fill="none" stroke="url(#cupOutline)" stroke-width="20" stroke-linecap="round" />
+  </g>
+</g></svg>

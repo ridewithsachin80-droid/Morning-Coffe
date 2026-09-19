@@ -25,6 +25,8 @@ pool.on('error', err => console.error('Pool error:', err.message));
 app.use(compression());
 app.use(express.json());
 app.use(cookieParser());
+// The service worker and manifest must never be served stale, or installs keep an old icon/version
+app.get(['/sw.js', '/manifest.webmanifest'], (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── DB INIT with retry ──
@@ -105,7 +107,9 @@ app.get('/api/me', auth, (req, res) =>
 
 // ── ITEMS ──
 app.get('/api/items', auth, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM items WHERE is_active=TRUE ORDER BY display_order,id');
+  const { rows } = await pool.query(
+    `SELECT i.*, m.name as created_by_name FROM items i LEFT JOIN members m ON m.id = i.created_by
+     WHERE i.is_active=TRUE ORDER BY i.display_order, i.id`);
   res.json(rows);
 });
 app.post('/api/items', auth, adminOnly, async (req, res) => {
@@ -147,7 +151,15 @@ app.put('/api/items/:id', auth, adminOnly, async (req, res) => {
     const { rows } = await pool.query(
       'UPDATE items SET name=$1,rate=$2,is_active=$3 WHERE id=$4 RETURNING *',
       [name, rate, is_active ?? true, req.params.id]);
-    res.json(rows[0]);
+    if (!rows.length) return res.status(404).json({ error: 'Item not found' });
+    // A corrected name/rate also fixes lines on rounds that are still OPEN (nothing paid yet).
+    // Partial/paid rounds keep their snapshot so settled bills never change.
+    const upd = await pool.query(
+      `UPDATE tab_entries te SET item_name=$1, rate=$2
+       FROM daily_sessions ds
+       WHERE ds.id = te.session_id AND ds.status='open' AND te.item_id=$3
+         AND (te.item_name <> $1 OR te.rate <> $2)`, [rows[0].name, rows[0].rate, rows[0].id]);
+    res.json({ ...rows[0], openEntriesUpdated: upd.rowCount });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/items/:id', auth, adminOnly, async (req, res) => {
@@ -333,6 +345,59 @@ app.post('/api/tab', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Who may change a tab line: admin, the member it belongs to, or whoever entered it
+function canTouchEntry(user, entry) {
+  return user.is_admin || entry.member_id === user.member_id || entry.added_by === user.member_id;
+}
+
+// Edit a tab entry added by mistake: change qty, swap the item, or move it to another member.
+// Only while the round is open — once payment has started the admin must reopen the round first.
+app.put('/api/tab/:id', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT te.*, ds.status FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id WHERE te.id=$1',
+      [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    const entry = rows[0];
+    if (entry.status !== 'open') return res.status(400).json({ error: 'Round is locked — payment already started' + (req.user.is_admin ? '. Reopen the round to edit.' : '') });
+    if (!canTouchEntry(req.user, entry)) return res.status(403).json({ error: 'Not your entry' });
+
+    let { qty, item_id, member_id } = req.body;
+    let itemName = entry.item_name, rate = entry.rate, itemId = entry.item_id, memberId = entry.member_id;
+    qty = qty === undefined ? entry.qty : parseInt(qty, 10);
+    if (!Number.isFinite(qty) || qty < 1 || qty > 50) return res.status(400).json({ error: 'Quantity must be 1–50' });
+
+    if (item_id !== undefined && Number(item_id) !== entry.item_id) {
+      const { rows: it } = await pool.query('SELECT * FROM items WHERE id=$1 AND is_active=TRUE', [item_id]);
+      if (!it.length) return res.status(400).json({ error: 'Item not on the menu' });
+      itemId = it[0].id; itemName = it[0].name; rate = it[0].rate;
+    }
+    if (member_id !== undefined && Number(member_id) !== entry.member_id) {
+      const { rows: mm } = await pool.query('SELECT id FROM members WHERE id=$1 AND is_active=TRUE', [member_id]);
+      if (!mm.length) return res.status(400).json({ error: 'Unknown or inactive member' });
+      memberId = mm[0].id;
+    }
+    const { rows: out } = await pool.query(
+      'UPDATE tab_entries SET qty=$1,item_id=$2,item_name=$3,rate=$4,member_id=$5 WHERE id=$6 RETURNING *',
+      [qty, itemId, itemName, rate, memberId, entry.id]);
+    res.json(out[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Everything I can fix in the current round: my own lines + lines I entered for others
+app.get('/api/tab/touched', auth, async (req, res) => {
+  try {
+    const sess = await resolveSession(req.query);
+    if (!sess) return res.json({ session: null, entries: [] });
+    const { rows } = await pool.query(
+      `SELECT te.*, m.name as member_name, ab.name as added_by_name
+       FROM tab_entries te JOIN members m ON m.id = te.member_id LEFT JOIN members ab ON ab.id = te.added_by
+       WHERE te.session_id=$1 AND (te.member_id=$2 OR te.added_by=$2)
+       ORDER BY te.added_at DESC`, [sess.id, req.user.member_id]);
+    res.json({ session: sess, entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Delete a specific tab entry (member can undo last add)
 app.delete('/api/tab/:id', auth, async (req, res) => {
   try {
@@ -342,8 +407,7 @@ app.delete('/api/tab/:id', auth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     if (rows[0].status !== 'open') return res.status(400).json({ error: 'Session is locked — payment already started' });
     // You can remove your own entries, and entries you added on someone else's behalf
-    if (!req.user.is_admin && rows[0].member_id !== req.user.member_id && rows[0].added_by !== req.user.member_id)
-      return res.status(403).json({ error: 'Not your entry' });
+    if (!canTouchEntry(req.user, rows[0])) return res.status(403).json({ error: 'Not your entry' });
     await pool.query('DELETE FROM tab_entries WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -371,9 +435,10 @@ app.get('/api/tab/all', auth, async (req, res) => {
     if (!sess) return res.json({ session: null, byMember: {}, itemSummary: {}, grandTotal: 0, entryCount: 0, payments: [], amountPaid: 0, pending: 0 });
 
     const { rows: entries } = await pool.query(
-      `SELECT te.*, m.name as member_name
+      `SELECT te.*, m.name as member_name, ab.name as added_by_name
        FROM tab_entries te
        JOIN members m ON m.id=te.member_id
+       LEFT JOIN members ab ON ab.id=te.added_by
        WHERE te.session_id=$1
        ORDER BY m.name, te.added_at`, [sess.id]);
 

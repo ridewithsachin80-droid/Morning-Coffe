@@ -46,6 +46,19 @@ Railway deploys automatically on every push. First deploy runs the schema and se
 
 ---
 
+## 📱 Install as an app (own icon, no Chrome badge)
+
+The app ships a web manifest, icon set (`public/icons/`, from `icon.svg`) and a service worker, so Chrome
+installs it as a real app instead of a bookmark-style shortcut.
+
+1. Remove any old home-screen shortcut (the grey "U" with a Chrome badge) — old shortcuts never update.
+2. Open the site in Chrome → ⋮ → **Install app** (not "Add shortcut" / "Create shortcut").
+3. iPhone: Safari → Share → **Add to Home Screen**.
+
+To change the icon later: replace `public/icons/icon.svg`, regenerate the PNGs, and bump `CACHE` in `public/sw.js`.
+
+---
+
 ## 🔑 First Login (Setup)
 
 On first visit, you'll see the **Setup screen**:
@@ -88,6 +101,16 @@ How it works: `audio → Groq Whisper → Groq LLM → validated against menu & 
 Fallback chain: Groq → Gemini → built-in rules. AI output is never written directly to the DB.
 Any member can *add* a missing item this way (`POST /api/items/quick`, max 15/day, records `created_by`);
 editing rates and removing items stays admin-only under **Items**. Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
+
+### ✏️ Fixing mistakes
+- **Live Board is home for everyone** (members and admin), with the AI mic on top.
+- Any line can be fixed while the round is **open**: tap ✏️ to change qty, swap the item, move it to another
+  member, or 🗑️ delete it. Members can fix their own lines and lines they entered for others; **admin can fix
+  any line**. Available on Live Board, Add Items ("Added this round") and My Tab.
+- Once payment has started the round is locked — admin taps **Reopen This Round** first.
+- **Menu mistakes (admin → Items):** rename, re-rate or remove any item; items added by members show
+  "🆕 added by …". Correcting a name/rate also updates that item's lines on rounds that are still open;
+  partial/paid rounds keep their original snapshot so settled bills never change.
 
 ### Reports:
 - Go to **Report** tab → pick date range → Generate

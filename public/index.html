@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#3d1f0a">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Coffee">
+<meta name="application-name" content="Morning Coffee">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <title>Morning Accounts ☕</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -233,6 +241,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 .ai-line input.ai-in.need{border-color:var(--danger);background:#fff5f4;}
 .ai-rate-wrap{display:flex;align-items:center;gap:4px;font-weight:700;color:var(--mocha);}
 .ai-new-note{font-size:.72rem;color:#1f5533;margin-top:6px;}
+
+.edit-pen{background:transparent;border:none;cursor:pointer;font-size:.95rem;padding:3px 6px;border-radius:6px;margin-left:4px;}
+.edit-pen:hover{background:var(--cream);}
+.ee-row{background:var(--milk);border:1.5px solid var(--cream);border-radius:12px;padding:10px;margin-bottom:8px;}
+.ee-row select{padding:7px 9px;border:1.5px solid var(--cream);border-radius:8px;background:var(--white);font-family:'DM Sans',sans-serif;font-size:.84rem;color:var(--espresso);min-width:0;flex:1;}
+.ee-meta{font-size:.72rem;color:var(--mocha);margin-bottom:6px;}
+.by-chip{display:inline-block;background:#e8f5e9;color:#1f5533;border-radius:20px;font-size:.66rem;font-weight:600;padding:1px 8px;margin-left:6px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -288,9 +303,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 
   <!-- MEMBER NAV -->
   <div class="nav" id="memberNav">
-    <button class="nav-btn active" onclick="showPage('addItems')">➕ Add Items</button>
+    <button class="nav-btn active" onclick="showPage('liveBoard')">📋 Live Board</button>
+    <button class="nav-btn" onclick="showPage('addItems')">➕ Add Items</button>
     <button class="nav-btn" onclick="showPage('myTab')">🧾 My Tab</button>
-    <button class="nav-btn" onclick="showPage('liveBoard')">💰 Pay Shop</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
     <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
@@ -350,8 +365,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
       </button>
     </div>
 
+    <!-- Fix mistakes right where they happen -->
+    <div class="card" id="touchedCard" style="display:none;">
+      <div class="card-title"><span>🧾 Added this round</span><span class="text-muted" style="font-family:'DM Sans',sans-serif;">tap ✏️ to fix a mistake</span></div>
+      <div id="touchedList"></div>
+    </div>
+
   </div>
 
+  <!-- (the "Added this round" fix-it list is injected at the end of Add Items) -->
   <!-- ══ MY TAB (member) ══ -->
   <div class="page" id="page-myTab">
     <div class="card">
@@ -366,7 +388,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     </div>
   </div>
 
-  <!-- ══ LIVE BOARD (admin) ══ -->
+  <!-- ══ LIVE BOARD (everyone) ══ -->
   <div class="page" id="page-liveBoard">
 
     <div id="liveBoardDate" class="flex-between" style="margin-bottom:10px;">
@@ -433,7 +455,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 </div>
 
 <!-- MODALS -->
-<div class="modal-bg" id="confirmModal">
+<div class="modal-bg" id="confirmModal" style="z-index:300;">
   <div class="modal">
     <div class="modal-title" id="confirmTitle">Confirm</div>
     <p id="confirmBody" style="color:var(--mocha);font-size:.9rem;"></p>
@@ -491,6 +513,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   </div>
 </div>
 
+<div class="modal-bg" id="entryEditModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-title" id="entryEditTitle">✏️ Fix entry</div>
+    <div id="entryEditBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeEntryEditor()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="aiConfirmModal">
   <div class="modal" style="max-width:480px;">
     <div class="modal-title">✨ Here's what I heard</div>
@@ -510,6 +542,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 <div class="toast" id="toast" style="display:none;"></div>
 
 <script>
+// PWA: register the service worker so Android installs this as a real app (own icon, no Chrome badge)
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 // ════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════
@@ -654,8 +688,8 @@ async function showApp() {
   if (document.getElementById('myTabDate')) document.getElementById('myTabDate').value = t;
   if (document.getElementById('boardDate')) document.getElementById('boardDate').value = t;
 
-  if (currentUser.isAdmin) { showPage('liveBoard'); }
-  else                     { showPage('addItems'); }
+  // the Live Board (with the AI mic on top) is home for everyone; the icon's long-press shortcut opens Add Items
+  showPage(new URLSearchParams(location.search).get('page') === 'addItems' ? 'addItems' : 'liveBoard');
 }
 
 async function logout() {
@@ -698,7 +732,8 @@ function initAddItems() {
   addQtys = {};
   renderQuickGrid();
   loadSessionStatus();
-  document.getElementById('addDate').onchange = () => { loadSessionStatus(); };
+  loadTouched();
+  document.getElementById('addDate').onchange = () => { loadSessionStatus(); loadTouched(); };
 }
 
 async function loadSessionStatus() {
@@ -783,6 +818,7 @@ async function submitItems() {
     addQtys = {};
     renderQuickGrid();
     loadSessionStatus();
+    loadTouched();
     toast('✅ Added!');
   } catch(e) { toast('Error: '+e.message); }
 }
@@ -1076,7 +1112,7 @@ async function aiConfirm() {
     document.getElementById('aiText').value = '';
     closeModal('aiConfirmModal');
     if (document.getElementById('page-liveBoard').classList.contains('active')) loadLiveBoard();
-    else { if (added.length) renderQuickGrid(); loadSessionStatus(); }
+    else { if (added.length) renderQuickGrid(); loadSessionStatus(); loadTouched(); }
     if (navigator.vibrate) navigator.vibrate([20,40,20]);
     toast(added.length ? `✅ Added — ${added.join(', ')} is now on the menu` : '✅ Added!');
   } catch(e) { toast('Error: '+e.message); aiRenderConfirm(); }
@@ -1131,6 +1167,7 @@ async function loadMyTab() {
       return;
     }
     const canDelete = session.status === 'open';
+    myTabEntries = {}; entries.forEach(e=>myTabEntries[e.id]=e);
     cont.innerHTML = `
       ${entries.map(e=>`
         <div class="tab-entry" id="entry-${e.id}">
@@ -1139,7 +1176,7 @@ async function loadMyTab() {
             <div class="tab-entry-time">${fmtTime(e.added_at)}${e.source==='voice'?' · 🎙️':e.source==='text'?' · ⌨️':''}${e.added_by && e.added_by!==e.member_id && e.added_by_name?' · added by '+esc(e.added_by_name):''}</div>
           </div>
           <div class="tab-entry-amt">₹${parseFloat(e.amount).toFixed(0)}</div>
-          ${canDelete?`<button class="tab-entry-del" onclick="deleteEntry(${e.id})" title="Remove">✕</button>`:''}
+          ${canDelete?`<button class="edit-pen" onclick="boardEntries[${e.id}]=myTabEntries[${e.id}];openEntryEditor([${e.id}])" title="Edit">✏️</button><button class="tab-entry-del" onclick="deleteEntry(${e.id})" title="Remove">✕</button>`:''}
         </div>`).join('')}
       <div class="divider"></div>
       <div class="flex-between">
@@ -1155,12 +1192,112 @@ async function deleteEntry(id) {
   try {
     await api('DELETE',`/api/tab/${id}`);
     document.getElementById('entry-'+id)?.remove();
+    document.getElementById('touched-'+id)?.remove();
     toast('Removed');
+    if (document.getElementById('page-myTab').classList.contains('active')) loadMyTab();
+    if (document.getElementById('page-addItems').classList.contains('active')) loadTouched();
   } catch(e) { toast('Error: '+e.message); }
 }
 
+
 // ════════════════════════════════════════════════════════
-// LIVE BOARD (admin)
+// FIX MISTAKES — edit / delete tab lines
+// ════════════════════════════════════════════════════════
+let boardEntries = {};   // id → entry, for whatever list is on screen
+let myTabEntries = {};
+let editorIds = [], editorDirty = false;
+
+function canTouch(e) {
+  return currentUser.isAdmin || e.member_id === currentUser.memberId || e.added_by === currentUser.memberId;
+}
+
+// "Added this round" on the Add Items page: my lines + lines I entered for others
+async function loadTouched() {
+  const card = document.getElementById('touchedCard'), list = document.getElementById('touchedList');
+  try {
+    const date = document.getElementById('addDate').value || todayStr();
+    const { session, entries } = await api('GET', `/api/tab/touched?date=${date}`);
+    if (!session || session.status !== 'open' || !entries.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    list.innerHTML = entries.map(e => { boardEntries[e.id] = e; return `
+      <div class="tab-entry" id="touched-${e.id}">
+        <div class="tab-entry-info">
+          <div class="tab-entry-name">${esc(e.item_name)} ×${e.qty}${e.member_id!==currentUser.memberId?`<span class="by-chip">for ${esc(e.member_name)}</span>`:''}</div>
+          <div class="tab-entry-time">${fmtTime(e.added_at)}${e.source==='voice'?' · 🎙️':e.source==='text'?' · ⌨️':''}${e.added_by && e.added_by!==currentUser.memberId && e.added_by_name?' · added by '+esc(e.added_by_name):''}</div>
+        </div>
+        <div class="tab-entry-amt">₹${parseFloat(e.amount).toFixed(0)}</div>
+        <button class="edit-pen" onclick="openEntryEditor([${e.id}])" title="Edit">✏️</button>
+        <button class="tab-entry-del" onclick="deleteEntry(${e.id})" title="Remove">✕</button>
+      </div>`; }).join('');
+  } catch(e) { card.style.display = 'none'; }
+}
+
+async function openEntryEditor(ids) {
+  editorIds = ids.filter(id => boardEntries[id]); editorDirty = false;
+  if (!editorIds.length) return;
+  if (!aiMembers.length) { try { aiMembers = await api('GET','/api/members/names'); } catch(e){} }
+  renderEntryEditor();
+  openModal('entryEditModal');
+}
+function renderEntryEditor() {
+  const body = document.getElementById('entryEditBody');
+  if (!editorIds.length) { closeEntryEditor(); return; }
+  document.getElementById('entryEditTitle').textContent = editorIds.length > 1 ? `✏️ Fix entries (${editorIds.length})` : '✏️ Fix entry';
+  body.innerHTML = editorIds.map(id => {
+    const e = boardEntries[id];
+    // the entry's item may have been removed from the menu since — keep it selectable as-is
+    const onMenu = allItems.some(i => i.id === e.item_id);
+    const itemOpts = (onMenu ? '' : `<option value="${e.item_id}" selected>${esc(e.item_name)} — ₹${parseFloat(e.rate).toFixed(0)}</option>`)
+      + allItems.map(i=>`<option value="${i.id}" ${i.id===e.item_id?'selected':''}>${esc(i.name)} — ₹${parseFloat(i.rate).toFixed(0)}</option>`).join('');
+    const memOpts = aiMembers.map(m=>`<option value="${m.id}" ${m.id===e.member_id?'selected':''}>${esc(m.name)}</option>`).join('');
+    return `<div class="ee-row">
+      <div class="ee-meta">${fmtTime(e.added_at)}${e.added_by_name?' · added by '+esc(e.added_by_name):''}${e.source==='voice'?' · 🎙️':''}</div>
+      <div class="flex gap-8" style="align-items:center;">
+        <select onchange="saveEntry(${id},{item_id:+this.value})" aria-label="Item">${itemOpts}</select>
+        <button class="tab-entry-del" onclick="editorDelete(${id})" title="Delete this line">🗑️</button>
+      </div>
+      <div class="flex gap-8" style="align-items:center;margin-top:8px;">
+        <select onchange="saveEntry(${id},{member_id:+this.value})" aria-label="Member">${memOpts}</select>
+        <div class="qty-ctrl" style="margin-top:0;">
+          <button class="qty-btn" onclick="saveEntry(${id},{qty:${e.qty-1}})" ${e.qty<=1?'disabled style="opacity:.35"':''}>−</button>
+          <div class="qty-val">${e.qty}</div>
+          <button class="qty-btn" onclick="saveEntry(${id},{qty:${e.qty+1}})">+</button>
+        </div>
+        <div class="bold" style="color:var(--caramel);min-width:48px;text-align:right;">₹${(parseFloat(e.rate)*e.qty).toLocaleString('en-IN')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function saveEntry(id, patch) {
+  try {
+    const out = await api('PUT', `/api/tab/${id}`, patch);
+    boardEntries[id] = { ...boardEntries[id], ...out };
+    editorDirty = true;
+  } catch(e) { toast('Error: '+e.message); }
+  renderEntryEditor();
+}
+function editorDelete(id) {
+  const e = boardEntries[id];
+  confirm('Delete this line?', `${e.item_name} ×${e.qty} — ₹${(parseFloat(e.rate)*e.qty).toLocaleString('en-IN')}`, async () => {
+    try {
+      await api('DELETE', `/api/tab/${id}`);
+      editorIds = editorIds.filter(x => x !== id); delete boardEntries[id]; editorDirty = true;
+      toast('Deleted');
+    } catch(err) { toast('Error: '+err.message); }
+    renderEntryEditor();
+  }, 'Delete', 'btn-danger');
+}
+function closeEntryEditor() {
+  closeModal('entryEditModal');
+  if (!editorDirty) return;
+  const on = n => document.getElementById('page-'+n).classList.contains('active');
+  if (on('liveBoard')) loadLiveBoard();
+  if (on('myTab'))     loadMyTab();
+  if (on('addItems'))  { loadTouched(); loadSessionStatus(); }
+}
+
+// ════════════════════════════════════════════════════════
+// LIVE BOARD (everyone)
 // ════════════════════════════════════════════════════════
 function setToday() {
   document.getElementById('boardDate').value = todayStr();
@@ -1245,29 +1382,32 @@ async function loadLiveBoard() {
       return;
     }
 
-    // Member cards
-    cont.innerHTML = Object.entries(byMember)
+    // Member cards. Lines are grouped per item; a ✏️ appears on any line the viewer may fix
+    // (admin: everything · member: own lines + lines they entered) while the round is open.
+    const isOpen = session.status === 'open';
+    boardEntries = {};
+    cont.innerHTML = (!isOpen && currentUser.isAdmin ? `<div class="text-muted" style="margin:0 2px 8px;">🔒 Round is locked — reopen it to edit or delete lines.</div>` : '')
+      + Object.entries(byMember)
       .sort((a,b)=>b[1].total-a[1].total)
       .map(([name,data])=>{
-        // Group entries by item
         const grouped = {};
         data.entries.forEach(e=>{
-          if (!grouped[e.item_name]) grouped[e.item_name]={qty:0,amount:0,rate:e.rate};
-          grouped[e.item_name].qty+=e.qty;
-          grouped[e.item_name].amount+=parseFloat(e.amount);
+          const g = grouped[e.item_name] || (grouped[e.item_name]={qty:0,amount:0,ids:[]});
+          g.qty+=e.qty; g.amount+=parseFloat(e.amount);
+          if (isOpen && canTouch(e)) { g.ids.push(e.id); boardEntries[e.id] = e; }
         });
         return `<div class="member-tab-card">
           <div class="member-tab-header">
             <div class="flex gap-8" style="align-items:center;">
               <div class="member-avatar">${initials(name)}</div>
-              <div class="member-tab-name">${name}</div>
+              <div class="member-tab-name">${esc(name)}</div>
             </div>
             <div class="member-tab-total">₹${data.total.toLocaleString('en-IN')}</div>
           </div>
           ${Object.entries(grouped).map(([iname,iv])=>`
-            <div class="item-summary-row">
-              <span>${iname} <span style="color:var(--mocha);">×${iv.qty}</span></span>
-              <span class="bold">₹${iv.amount.toLocaleString('en-IN')}</span>
+            <div class="item-summary-row" style="align-items:center;">
+              <span>${esc(iname)} <span style="color:var(--mocha);">×${iv.qty}</span></span>
+              <span style="white-space:nowrap;"><span class="bold">₹${iv.amount.toLocaleString('en-IN')}</span>${iv.ids.length?`<button class="edit-pen" title="Edit / delete" onclick="openEntryEditor([${iv.ids.join(',')}])">✏️</button>`:''}</span>
             </div>`).join('')}
         </div>`;
       }).join('');
@@ -1519,19 +1659,24 @@ async function loadAdminItems() {
   allItems = await api('GET','/api/items');
   const list = document.getElementById('itemsList');
   list.innerHTML = allItems.map(it=>`
+    ${it.created_by_name?`<div style="margin:6px 0 -4px;"><span class="by-chip" style="margin-left:0;">🆕 added by ${esc(it.created_by_name)}</span></div>`:''}
     <div class="rate-row">
-      <input class="form-input" style="flex:2;margin-right:8px;padding:6px 10px;" id="iname-${it.id}" value="${it.name}">
+      <input class="form-input" style="flex:2;margin-right:8px;padding:6px 10px;" id="iname-${it.id}" value="${esc(it.name)}">
       <span style="color:var(--mocha);font-size:.83rem;margin-right:4px;">₹</span>
       <input type="number" class="rate-input" style="margin-right:8px;" id="irate-${it.id}" value="${parseFloat(it.rate).toFixed(0)}" min="0">
       <button class="btn btn-ghost btn-sm" onclick="saveItem(${it.id})">💾</button>
-      <button class="btn btn-danger btn-sm" style="margin-left:5px;" onclick="deleteItem(${it.id},'${it.name.replace(/'/g,"\\'")}')">✕</button>
+      <button class="btn btn-danger btn-sm" style="margin-left:5px;" onclick="deleteItem(${it.id},'${esc(it.name.replace(/'/g,"\\'"))}')">✕</button>
     </div>`).join('');
 }
 async function saveItem(id) {
   const name=document.getElementById('iname-'+id).value.trim();
   const rate=parseFloat(document.getElementById('irate-'+id).value)||0;
   if (!name) { toast('Name required'); return; }
-  try { await api('PUT',`/api/items/${id}`,{name,rate,is_active:true}); toast('✅ Saved'); allItems=await api('GET','/api/items'); }
+  try {
+    const out = await api('PUT',`/api/items/${id}`,{name,rate,is_active:true});
+    toast(out.openEntriesUpdated ? `✅ Saved — ${out.openEntriesUpdated} line(s) on the open round updated too` : '✅ Saved');
+    allItems = await api('GET','/api/items');
+  }
   catch(e) { toast('Error: '+e.message); }
 }
 async function addItem() {
