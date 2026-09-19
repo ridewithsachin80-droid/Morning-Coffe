@@ -109,6 +109,9 @@ WHERE ds.status = 'paid'
 ALTER TABLE tab_entries ADD COLUMN IF NOT EXISTS added_by INT REFERENCES members(id);
 ALTER TABLE tab_entries ADD COLUMN IF NOT EXISTS source   VARCHAR(10) DEFAULT 'tap';
 
+-- Who added a menu item (members can add missing items while ordering by voice)
+ALTER TABLE items ADD COLUMN IF NOT EXISTS created_by INT REFERENCES members(id);
+
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 

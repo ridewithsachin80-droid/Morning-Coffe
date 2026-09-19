@@ -70,10 +70,14 @@ Then log in as admin and start adding members.
 4. At end of day/month → select approved orders → **Mark as Paid** (records payment to coffee shop)
 
 ### ✨ AI order (voice or typed)
-On **Add Items**, tap the mic and just say it — English, Kannada or Hindi, mixed is fine:
+The AI mic is the front door: it sits at the top of the home screen (Live Board for admin, Add Items for members).
+Tap it and just say it — English, Kannada or Hindi, mixed is fine:
 - *"Two coffee and one maddur vada"*
 - *"Eradu kaapi, ondu tea for Ravi"* — adds the tea to **Ravi's** tab (shows "added by you")
 - *"Twenty rupees coffee"* — a spoken price picks the right variant
+- *"Masala dosa, fifty rupees"* — **not on the menu?** It shows as a 🆕 NEW line: confirm the name, enter the
+  rate (pre-filled if you said it), and it's added to the menu for everyone and to your tab in one tap.
+  Near-miss spellings ("Masalah dosa") match the existing item instead of creating a duplicate.
 - *"My usual"* / *"same as yesterday"* — repeats your last order
 
 Recording stops by itself when you stop talking. You always get a confirmation sheet
@@ -82,7 +86,8 @@ highlighted. Ambiguous items (e.g. two Coffee rates) resolve to what that person
 
 How it works: `audio → Groq Whisper → Groq LLM → validated against menu & members → confirm → /api/tab`.
 Fallback chain: Groq → Gemini → built-in rules. AI output is never written directly to the DB.
-Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
+Any member can *add* a missing item this way (`POST /api/items/quick`, max 15/day, records `created_by`);
+editing rates and removing items stays admin-only under **Items**. Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
 
 ### Reports:
 - Go to **Report** tab → pick date range → Generate

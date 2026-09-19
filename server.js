@@ -115,6 +115,32 @@ app.post('/api/items', auth, adminOnly, async (req, res) => {
     res.json(rows[0]);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Any member: add a missing item to the menu while ordering (AI flow — "masala dosa, 50 rupees").
+// Add-only: editing rates and removing items stays admin-only. If the name already exists it is
+// reused (and re-activated if it had been removed) instead of creating a duplicate.
+app.post('/api/items/quick', auth, async (req, res) => {
+  try {
+    const name = String(req.body.name || '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const rate = Math.round(parseFloat(req.body.rate) * 100) / 100;
+    if (name.length < 2) return res.status(400).json({ error: 'Item name required' });
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 5000) return res.status(400).json({ error: `Enter a valid rate for ${name}` });
+
+    const { rows: ex } = await pool.query('SELECT * FROM items WHERE LOWER(name)=LOWER($1)', [name]);
+    if (ex.length) {
+      if (ex[0].is_active) return res.json({ ...ex[0], existed: true });
+      const { rows } = await pool.query('UPDATE items SET is_active=TRUE, rate=$1 WHERE id=$2 RETURNING *', [rate, ex[0].id]);
+      return res.json({ ...rows[0], reactivated: true });
+    }
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int as n FROM items WHERE created_by=$1 AND created_at > NOW() - INTERVAL '1 day'`, [req.user.member_id]);
+    if (!req.user.is_admin && cnt[0].n >= 15) return res.status(429).json({ error: 'Too many new items today — ask the admin to add it' });
+    const { rows: mx } = await pool.query('SELECT COALESCE(MAX(display_order),0)+1 as o FROM items');
+    const { rows } = await pool.query(
+      'INSERT INTO items (name,rate,display_order,created_by) VALUES ($1,$2,$3,$4) RETURNING *',
+      [name, rate, mx[0].o, req.user.member_id]);
+    res.json(rows[0]);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.put('/api/items/:id', auth, adminOnly, async (req, res) => {
   try {
     const { name, rate, is_active } = req.body;

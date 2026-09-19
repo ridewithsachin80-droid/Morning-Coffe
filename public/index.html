@@ -219,6 +219,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 .or-sep{display:flex;align-items:center;gap:10px;color:var(--mocha);font-size:.72rem;text-transform:uppercase;letter-spacing:.8px;margin:2px 0 12px;}
 .or-sep::before,.or-sep::after{content:'';flex:1;height:1px;background:var(--cream);}
 .src-chip{font-size:.68rem;color:var(--mocha);}
+
+.ai-card.compact{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"top top" "mic status" "mic hint" "text text";column-gap:14px;align-items:center;text-align:left;padding:12px 14px;}
+.ai-card.compact .ai-card-top{grid-area:top;margin-bottom:2px;}
+.ai-card.compact .mic-btn{grid-area:mic;width:62px;height:62px;font-size:1.5rem;margin:4px 0;}
+.ai-card.compact .ai-status{grid-area:status;align-self:end;}
+.ai-card.compact .ai-hint{grid-area:hint;align-self:start;margin-top:0;}
+.ai-card.compact .ai-text-row{grid-area:text;margin-top:8px;}
+.ai-line.isnew{border-color:var(--success);background:#f0faf4;}
+.ai-new-badge{display:inline-block;background:var(--success);color:#fff;font-size:.66rem;font-weight:700;border-radius:20px;padding:2px 8px;letter-spacing:.4px;white-space:nowrap;}
+.ai-line input.ai-in{padding:7px 9px;border:1.5px solid var(--cream);border-radius:8px;background:var(--white);font-family:'DM Sans',sans-serif;font-size:.86rem;color:var(--espresso);min-width:0;}
+.ai-line input.ai-in:focus{outline:none;border-color:var(--caramel);}
+.ai-line input.ai-in.need{border-color:var(--danger);background:#fff5f4;}
+.ai-rate-wrap{display:flex;align-items:center;gap:4px;font-weight:700;color:var(--mocha);}
+.ai-new-note{font-size:.72rem;color:#1f5533;margin-top:6px;}
 </style>
 </head>
 <body>
@@ -291,16 +305,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
-  <!-- ══ ADD ITEMS (member & admin) ══ -->
-  <div class="page active" id="page-addItems">
-    <div class="card">
-      <div class="card-title">
-        <span>📅 Date</span>
-        <input type="date" class="form-input" id="addDate" style="width:auto;padding:5px 10px;font-size:.82rem;">
-      </div>
-      <div id="sessionStatusBanner"></div>
-    </div>
-
+  <!-- ══ AI DOCK — home of the app: lives above the pages, shown on Live Board + Add Items ══ -->
+  <div id="aiDock" style="max-width:860px;margin:0 auto;padding:14px 14px 0;">
     <!-- AI order: speak or type, confirm, done -->
     <div class="ai-card" id="aiCard">
       <div class="ai-card-top">
@@ -317,9 +323,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
         <button onclick="aiSendText()" aria-label="Send">➤</button>
       </div>
     </div>
-
     <!-- Recent adds confirmation -->
     <div id="recentAdds"></div>
+  </div>
+
+  <!-- ══ ADD ITEMS (member & admin) ══ -->
+  <div class="page active" id="page-addItems">
+    <div class="card">
+      <div class="card-title">
+        <span>📅 Date</span>
+        <input type="date" class="form-input" id="addDate" style="width:auto;padding:5px 10px;font-size:.82rem;">
+      </div>
+      <div id="sessionStatusBanner"></div>
+    </div>
 
     <div class="card">
       <div class="card-title">☕ Or tap what you took</div>
@@ -479,7 +495,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
   <div class="modal" style="max-width:480px;">
     <div class="modal-title">✨ Here's what I heard</div>
     <div id="aiConfirmBody"></div>
-    <div class="modal-actions" style="justify-content:space-between;">
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;">
       <button class="btn btn-ghost" style="white-space:nowrap;" onclick="aiRetry()">🎙️ Retry</button>
       <div class="flex gap-8">
         <button class="btn btn-ghost" onclick="closeModal('aiConfirmModal')">Cancel</button>
@@ -663,6 +679,12 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
+  // AI dock is the front door: full size on Add Items, compact on the Live Board
+  const dock = document.getElementById('aiDock');
+  dock.style.display = (name==='addItems' || name==='liveBoard') ? 'block' : 'none';
+  document.getElementById('aiCard').classList.toggle('compact', name==='liveBoard');
+  if (name!=='addItems') document.getElementById('recentAdds').innerHTML = '';
+  aiInit();
   document.querySelectorAll('.nav-btn').forEach(b=>{
     if (b.getAttribute('onclick')?.includes(`'${name}'`)) b.classList.add('active');
   });
@@ -676,9 +698,7 @@ function initAddItems() {
   addQtys = {};
   renderQuickGrid();
   loadSessionStatus();
-  document.getElementById('recentAdds').innerHTML = '';
   document.getElementById('addDate').onchange = () => { loadSessionStatus(); };
-  aiInit();
 }
 
 async function loadSessionStatus() {
@@ -795,6 +815,10 @@ async function aiInit() {
     document.getElementById('aiLang').style.display = 'none';
     aiSetStatus('Type what you had', 'Voice isn’t available on this browser — typing works the same way');
   }
+}
+function aiActiveDate() {
+  const onBoard = document.getElementById('page-liveBoard').classList.contains('active');
+  return (onBoard ? document.getElementById('boardDate')?.value : document.getElementById('addDate')?.value) || todayStr();
 }
 function aiSaveLang(){ try { localStorage.setItem('mc_lang', document.getElementById('aiLang').value); } catch(e){} }
 
@@ -931,12 +955,21 @@ async function aiParseText(text) {
 }
 
 // ── Confirmation sheet ──
+// A line is either a menu item {item_id, qty, member_id, sure} or a NEW item
+// {isNew:true, name, rate, qty, member_id} that gets added to the menu on confirm.
 function aiShowResult(d) {
   aiLines = (d.lines||[]).map(l=>({...l}));
+  (d.new_items||[]).forEach(n => aiLines.push({ isNew:true, name:n.item_name, rate:n.rate, qty:n.qty, member_id:n.member_id }));
   aiMeta = { transcript: d.transcript || '', unmatched: d.unmatched || [] };
   if (!aiLines.length && !aiMeta.unmatched.length && !aiMeta.transcript) { toast("Didn't catch an order — try again"); return; }
   aiRenderConfirm();
   openModal('aiConfirmModal');
+  // jump straight to the first missing rate so it's one number + one tap
+  setTimeout(()=>document.querySelector('#aiConfirmBody .ai-in.need')?.focus(), 150);
+}
+function aiLineRate(l) {
+  if (l.isNew) return parseFloat(l.rate) || 0;
+  const it = allItems.find(i=>i.id===l.item_id); return it ? parseFloat(it.rate) : 0;
 }
 function aiRenderConfirm() {
   const body = document.getElementById('aiConfirmBody');
@@ -945,47 +978,86 @@ function aiRenderConfirm() {
   const meId = currentUser.memberId;
   const members = aiMembers.length ? aiMembers : [{id:meId,name:currentUser.name}];
   const memOpts = sel => members.map(m=>`<option value="${m.id}" ${m.id===sel?'selected':''}>${m.id===meId?'Me ('+esc(m.name)+')':esc(m.name)}</option>`).join('');
-  let total = 0;
-  const rows = aiLines.map((l,idx)=>{
-    const it = allItems.find(i=>i.id===l.item_id); const rate = it?parseFloat(it.rate):0; total += rate*l.qty;
-    return `<div class="ai-line ${l.sure===false?'unsure':''}">
-      <div class="ai-line-top">
-        <select onchange="aiEdit(${idx},'item_id',this.value)" aria-label="Item">${itemOpts(l.item_id)}</select>
-        <button class="tab-entry-del" onclick="aiRemoveLine(${idx})" title="Remove">✕</button>
-      </div>
+  const bottom = (l,idx) => `
       <div class="ai-line-bot">
         <select onchange="aiEdit(${idx},'member_id',this.value)" aria-label="For whom">${memOpts(l.member_id)}</select>
         <div class="qty-ctrl">
           <button class="qty-btn" onclick="aiQty(${idx},-1)">−</button>
-          <div class="qty-val">${l.qty}</div>
+          <div class="qty-val" id="aiq-${idx}">${l.qty}</div>
           <button class="qty-btn" onclick="aiQty(${idx},1)">+</button>
         </div>
-        <div class="bold" style="color:var(--caramel);min-width:48px;text-align:right;">₹${(rate*l.qty).toLocaleString('en-IN')}</div>
+        <div class="bold" id="aiamt-${idx}" style="color:var(--caramel);min-width:48px;text-align:right;"></div>
+      </div>`;
+  const rows = aiLines.map((l,idx)=> l.isNew ? `
+    <div class="ai-line isnew">
+      <div class="ai-line-top">
+        <span class="ai-new-badge">🆕 NEW</span>
+        <input class="ai-in" style="flex:1;" value="${esc(l.name)}" maxlength="60" aria-label="New item name" oninput="aiLines[${idx}].name=this.value">
+        <button class="tab-entry-del" onclick="aiRemoveLine(${idx})" title="Remove">✕</button>
       </div>
+      <div class="ai-line-bot">
+        <span class="text-muted" style="flex:1;">Rate per item</span>
+        <span class="ai-rate-wrap">₹<input class="ai-in ${l.rate?'':'need'}" style="width:96px;text-align:center;font-weight:700;" type="number" inputmode="decimal" min="1" step="1" placeholder="Rate" value="${l.rate||''}" aria-label="Rate" oninput="aiSetRate(${idx},this)" onkeydown="if(event.key==='Enter')aiConfirm()"></span>
+      </div>${bottom(l,idx)}
+      <div class="ai-new-note">Not on the menu yet — enter the rate and I’ll add it to the menu for everyone</div>
+    </div>` : `
+    <div class="ai-line ${l.sure===false?'unsure':''}">
+      <div class="ai-line-top">
+        <select onchange="aiEdit(${idx},'item_id',this.value)" aria-label="Item">${itemOpts(l.item_id)}</select>
+        <button class="tab-entry-del" onclick="aiRemoveLine(${idx})" title="Remove">✕</button>
+      </div>${bottom(l,idx)}
       ${l.sure===false?`<div class="ai-unsure-note">⚠️ I wasn’t sure about this one — please check</div>`:''}
-    </div>`;
-  }).join('');
+    </div>`).join('');
   body.innerHTML = `
     ${t?`<div class="ai-heard">“${esc(t)}”</div>`:''}
-    ${um.length?`<div class="ai-unmatched">Not on the menu: <b>${um.map(esc).join(', ')}</b></div>`:''}
-    ${rows || '<div class="empty-state"><div class="icon">🤔</div><p>I couldn’t match that to anything on the menu.<br>Try again, or tap the items below.</p></div>'}
-    ${aiLines.length?`<div class="flex-between" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="aiAddLine()">＋ Add line</button>
-      <span><span class="text-muted">Total </span><span class="grand-total-lbl">₹${total.toLocaleString('en-IN')}</span></span></div>`:''}`;
+    ${um.length?`<div class="ai-unmatched">Couldn’t understand: <b>${um.map(esc).join(', ')}</b></div>`:''}
+    ${rows || '<div class="empty-state" style="padding:18px;"><div class="icon">🤔</div><p>I didn’t catch an order there.</p></div>'}
+    <div class="flex-between" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
+      <span class="flex gap-8"><button class="btn btn-ghost btn-sm" onclick="aiAddLine()">＋ Menu item</button><button class="btn btn-ghost btn-sm" onclick="aiAddNewLine()">🆕 New item</button></span>
+      <span><span class="text-muted">Total </span><span class="grand-total-lbl" id="aiTotal">₹0</span></span>
+    </div>`;
+  aiUpdateTotals();
+}
+// Totals are patched in place so typing a name / rate never loses focus
+function aiUpdateTotals() {
+  let total = 0;
+  aiLines.forEach((l,idx)=>{ const amt = aiLineRate(l)*l.qty; total += amt;
+    const el = document.getElementById('aiamt-'+idx); if (el) el.textContent = amt ? '₹'+amt.toLocaleString('en-IN') : '₹—'; });
+  const tEl = document.getElementById('aiTotal'); if (tEl) tEl.textContent = '₹'+total.toLocaleString('en-IN');
   const btn = document.getElementById('aiConfirmBtn');
   btn.style.display = aiLines.length ? '' : 'none';
   btn.textContent = `✅ Add ₹${total.toLocaleString('en-IN')}`;
 }
+function aiSetRate(idx, el) { aiLines[idx].rate = parseFloat(el.value)||null; el.classList.toggle('need', !aiLines[idx].rate); aiUpdateTotals(); }
 function aiEdit(idx, key, val) { aiLines[idx][key] = parseInt(val,10); aiLines[idx].sure = true; aiRenderConfirm(); }
-function aiQty(idx, d) { aiLines[idx].qty = Math.max(1, Math.min(50, aiLines[idx].qty + d)); aiRenderConfirm(); }
+function aiQty(idx, d) { aiLines[idx].qty = Math.max(1, Math.min(50, aiLines[idx].qty + d)); document.getElementById('aiq-'+idx).textContent = aiLines[idx].qty; aiUpdateTotals(); }
 function aiRemoveLine(idx) { aiLines.splice(idx,1); aiRenderConfirm(); }
 function aiAddLine() { if (allItems.length) { aiLines.push({ item_id: allItems[0].id, qty:1, member_id: currentUser.memberId, sure:true }); aiRenderConfirm(); } }
+function aiAddNewLine() { aiLines.push({ isNew:true, name:'', rate:null, qty:1, member_id: currentUser.memberId }); aiRenderConfirm(); const ins=document.querySelectorAll('#aiConfirmBody .ai-line.isnew input[aria-label="New item name"]'); ins[ins.length-1]?.focus(); }
 function aiRetry() { closeModal('aiConfirmModal'); if (document.getElementById('micBtn').style.display!=='none') setTimeout(aiMicTap, 250); else document.getElementById('aiText').focus(); }
 
 async function aiConfirm() {
   if (!aiLines.length) return;
-  const date = document.getElementById('addDate').value || todayStr();
+  // every new item needs a name + rate before anything is saved
+  const bad = aiLines.findIndex(l => l.isNew && (!(l.name||'').trim() || !(parseFloat(l.rate) > 0)));
+  if (bad >= 0) {
+    toast(`Enter the ${(aiLines[bad].name||'').trim() ? 'rate for '+aiLines[bad].name.trim() : 'new item name'}`);
+    const need = document.querySelector('#aiConfirmBody .ai-in.need') || document.querySelector('#aiConfirmBody .ai-line.isnew input');
+    need?.focus(); return;
+  }
+  const date = aiActiveDate();
   const btn = document.getElementById('aiConfirmBtn'); btn.disabled = true;
   try {
+    // 1) add any new items to the menu, then treat them as ordinary lines
+    const added = [];
+    for (const l of aiLines) {
+      if (!l.isNew) continue;
+      const it = await api('POST','/api/items/quick',{ name:l.name.trim(), rate:l.rate });
+      if (!allItems.find(i=>i.id===it.id)) allItems.push(it);
+      if (!it.existed) added.push(it.name);
+      l.isNew = false; l.item_id = it.id; l.sure = true;
+    }
+    // 2) save the order
     const entries = aiLines.map(l=>({ item_id:l.item_id, qty:l.qty, member_id:l.member_id }));
     await api('POST','/api/tab',{ date, entries, source: aiSource });
     const meId = currentUser.memberId; let total = 0;
@@ -996,17 +1068,18 @@ async function aiConfirm() {
     }).join(', ');
     const strip = document.createElement('div');
     strip.className = 'add-confirm-strip card';
-    strip.innerHTML = `<div><div class="bold">✅ Added ${aiSource==='voice'?'by voice 🎙️':'✨'}</div><div class="text-muted">${esc(desc)}</div></div>
+    strip.innerHTML = `<div><div class="bold">✅ Added ${aiSource==='voice'?'by voice 🎙️':'✨'}</div><div class="text-muted">${esc(desc)}${added.length?'<br>🆕 Added to menu: '+esc(added.join(', ')):''}</div></div>
       <div class="bold" style="color:var(--caramel);">₹${total.toLocaleString('en-IN')}</div>`;
     const ra = document.getElementById('recentAdds');
     ra.insertBefore(strip, ra.firstChild);
     if (ra.children.length > 3) ra.removeChild(ra.lastChild);
     document.getElementById('aiText').value = '';
     closeModal('aiConfirmModal');
-    loadSessionStatus();
+    if (document.getElementById('page-liveBoard').classList.contains('active')) loadLiveBoard();
+    else { if (added.length) renderQuickGrid(); loadSessionStatus(); }
     if (navigator.vibrate) navigator.vibrate([20,40,20]);
-    toast('✅ Added!');
-  } catch(e) { toast('Error: '+e.message); }
+    toast(added.length ? `✅ Added — ${added.join(', ')} is now on the menu` : '✅ Added!');
+  } catch(e) { toast('Error: '+e.message); aiRenderConfirm(); }
   finally { btn.disabled = false; }
 }
 

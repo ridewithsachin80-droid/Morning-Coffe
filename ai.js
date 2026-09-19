@@ -73,8 +73,10 @@ SPEAKER: id ${ctx.speaker.id} (${ctx.speaker.name})
 SPEAKER'S LAST ORDER: ${last}
 
 RULES
-- Output ONLY JSON: {"lines":[{"item_id":<int>,"qty":<int>,"member_id":<int>,"sure":<bool>,"heard":"<words you matched>"}],"unmatched":["<phrase>"]}
-- item_id MUST be an id from MENU. Never invent items. If something ordered is not on the menu, put the phrase in "unmatched".
+- Output ONLY JSON: {"lines":[{"item_id":<int>,"qty":<int>,"member_id":<int>,"sure":<bool>,"heard":"<words you matched>"}],"new_items":[{"name":"<Clean Item Name>","qty":<int>,"member_id":<int>,"rate":<number|null>}],"unmatched":["<phrase>"]}
+- First SEARCH the MENU carefully: match by meaning, spelling variants and mishearings ("masalah dosa" = "Masala Dosa", "idly" = "Idli", "wada" = "Vada"). item_id MUST be an id from MENU — never invent ids.
+- If a real food or drink was ordered that is genuinely NOT on the MENU, put it in "new_items" so it can be added to the menu: give a clean, correctly spelled, Title Case name (e.g. "Masala Dosa", "Lemon Tea"), its qty and member_id, and "rate" ONLY if the speaker said a price ("masala dosa fifty rupees" → 50), else null. Never guess a rate.
+- "unmatched" is only for words you could not understand at all. Not for food items.
 - qty defaults to 1. Understand number words: one/two/three, ondu/eradu/mooru/naalku/aidu, ek/do/teen/chaar/paanch, "a couple" = 2.
 - member_id: the speaker, unless they clearly order for someone else ("one tea for Ravi", "Ravi ge ondu tea", "Kiran ke liye coffee"). Match names loosely to MEMBERS. If a named person is not in MEMBERS, use the speaker and set sure=false.
 - Synonyms: kaapi/kapi/coffee; chai/chaha/tea/tee; neeru/paani/water; idly/idli; vade/vada/wada; "black"/"decoction" = black coffee.
@@ -184,8 +186,10 @@ function tokenize(s) {
     .map(t => SYNONYMS[t] || t);
 }
 
+const RULE_FILLER = new Set(['for','ge','ke','liye','ko','to','please','pls','i','had','took','want','give','me','my','kodi','beku','get','add','of','the','plate','cup','glass']);
+
 function ruleParse(text, ctx) {
-  const lines = [], unmatched = [];
+  const lines = [], unmatched = [], newItems = [];
   if (USUAL_RE.test(text)) {
     (ctx.lastOrder || []).forEach(l => lines.push({ item_id: l.item_id, qty: l.qty, member_id: ctx.speaker.id, sure: true, heard: 'usual' }));
     if (!lines.length) unmatched.push('usual (no earlier order found)');
@@ -232,52 +236,97 @@ function ruleParse(text, ctx) {
     for (const { item, toks: it } of itemTokens) {
       const shared = it.filter(t => toks.includes(t)).length;
       if (!shared) continue;
+      // "set dosa" must not become "Masala Dosa": if BOTH sides have words the other lacks, it's a different item
+      const chunkExtra = toks.filter(t => !it.includes(t) && !RULE_FILLER.has(t)).length;
+      if (chunkExtra > 0 && it.length - shared > 0) continue;
       const score = shared * 10 - Math.abs(it.length - shared)
         + (rateHint !== null && parseFloat(item.rate) === rateHint ? 5 : 0)
         + (speakerUsual.includes(item.id) ? 0.5 : 0);
       if (score > bestScore) { best = item; bestScore = score; tie = false; }
       else if (score === bestScore) tie = true;
     }
-    if (!best) { unmatched.push(chunk); continue; }
+    if (!best) {
+      // Not on the menu → offer it as a new menu item (user supplies / confirms the rate)
+      const FILLER = new Set(['for','ge','ke','liye','ko','to','please','pls','i','had','took','want','give','me','my','kodi','beku','get','add','of','plate','rupees','rs','the']);
+      const name = toks.filter(t => !FILLER.has(t) || t === 'plate').join(' ').trim();
+      if (name.length >= 3 && /[a-z]/.test(name)) newItems.push({ name, qty, member_id: memberId, rate: rateHint });
+      else unmatched.push(chunk);
+      continue;
+    }
 
     const existing = lines.find(l => l.item_id === best.id && l.member_id === memberId);
     if (existing) existing.qty += qty;
     else lines.push({ item_id: best.id, qty, member_id: memberId, sure: !tie && memberSure, heard: chunk });
   }
-  return { lines, unmatched };
+  return { lines, unmatched, new_items: newItems };
 }
 
 // ── validation: never trust model output ────────────────────────
+const normName = n => cleanItemName(n).toLowerCase().replace(/[^a-z0-9]/g, '');
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function tidyName(n) {
+  let s = String(n || '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/[.,;:!?"“”]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (s && s === s.toLowerCase()) s = s.replace(/\b[a-z]/g, c => c.toUpperCase());   // title-case if all lower
+  return s;
+}
+
 function validate(raw, ctx) {
   const itemById   = new Map(ctx.items.map(i => [Number(i.id), i]));
+  const itemByNorm = new Map(ctx.items.map(i => [normName(i.name), i]));
   const memberById = new Map(ctx.members.map(m => [Number(m.id), m]));
-  const merged = new Map();
+  const self = memberById.get(Number(ctx.speaker.id)) || ctx.speaker;
+  const merged = new Map(), newMerged = new Map();
   const unmatched = Array.isArray(raw?.unmatched) ? raw.unmatched.map(String).filter(Boolean).slice(0, 10) : [];
+
+  const qtyOf = q => { let n = parseInt(q, 10); if (!Number.isFinite(n) || n < 1) n = 1; return Math.min(MAX_QTY, n); };
+  const addLine = (item, qty, member, sure, heard) => {
+    const key = `${item.id}:${member.id}`;
+    if (merged.has(key)) { merged.get(key).qty = Math.min(MAX_QTY, merged.get(key).qty + qty); return; }
+    merged.set(key, { item_id: item.id, item_name: item.name, rate: parseFloat(item.rate), qty,
+      member_id: member.id, member_name: member.name, sure, heard: String(heard || '').slice(0, 80) });
+  };
+  const addNew = (name, qty, member, rate) => {
+    name = tidyName(name);
+    if (name.length < 2) return;
+    const nn = normName(name);
+    const existing = itemByNorm.get(nn);                      // the model missed a menu item → treat as a normal line
+    if (existing) return addLine(existing, qty, member, true, name);
+    // near-miss spelling ("Masalah Dosa" vs "Masala Dosa") → use the menu item, but flag it for a glance
+    if (nn.length >= 6) for (const [k, it] of itemByNorm) {
+      if (Math.abs(k.length - nn.length) <= 2 && lev(k, nn) <= 2) return addLine(it, qty, member, false, name);
+    }
+    const key = `${normName(name)}:${member.id}`;
+    if (newMerged.has(key)) { newMerged.get(key).qty = Math.min(MAX_QTY, newMerged.get(key).qty + qty); return; }
+    let r = parseFloat(rate); if (!Number.isFinite(r) || r <= 0 || r > 5000) r = null;
+    newMerged.set(key, { is_new: true, item_name: name, rate: r, qty, member_id: member.id, member_name: member.name });
+  };
 
   for (const l of Array.isArray(raw?.lines) ? raw.lines : []) {
     const item = itemById.get(Number(l.item_id));
-    if (!item) { if (l.heard) unmatched.push(String(l.heard)); continue; }
-    let qty = parseInt(l.qty, 10);
-    if (!Number.isFinite(qty) || qty < 1) qty = 1;
     let sure = l.sure !== false;
-    if (qty > MAX_QTY) { qty = MAX_QTY; sure = false; }
     let member = memberById.get(Number(l.member_id));
-    if (!member) { member = memberById.get(Number(ctx.speaker.id)) || ctx.speaker; if (l.member_id != null) sure = false; }
-
-    const key = `${item.id}:${member.id}`;
-    if (merged.has(key)) { merged.get(key).qty = Math.min(MAX_QTY, merged.get(key).qty + qty); continue; }
-    merged.set(key, {
-      item_id: item.id, item_name: item.name, rate: parseFloat(item.rate), qty,
-      member_id: member.id, member_name: member.name, sure, heard: String(l.heard || '').slice(0, 80),
-    });
+    if (!member) { member = self; if (l.member_id != null) sure = false; }
+    if (!item) { if (l.heard) addNew(l.heard, qtyOf(l.qty), member, null); continue; }
+    if (parseInt(l.qty, 10) > MAX_QTY) sure = false;
+    addLine(item, qtyOf(l.qty), member, sure, l.heard);
   }
-  return { lines: [...merged.values()], unmatched };
+  for (const n of (Array.isArray(raw?.new_items) ? raw.new_items : []).slice(0, 8)) {
+    if (!n || !n.name) continue;
+    addNew(n.name, qtyOf(n.qty), memberById.get(Number(n.member_id)) || self, n.rate);
+  }
+  return { lines: [...merged.values()], new_items: [...newMerged.values()], unmatched };
 }
 
 // ── public API ──────────────────────────────────────────────────
 async function parseText(text, ctx) {
   text = String(text || '').trim().slice(0, 500);
-  if (!text) return { transcript: '', lines: [], unmatched: [], engine: 'none' };
+  if (!text) return { transcript: '', lines: [], new_items: [], unmatched: [], engine: 'none' };
   const errors = [];
   if (GROQ_KEY) {
     try { return { transcript: text, ...validate(await groqParse(text, ctx), ctx), engine: 'groq' }; }
@@ -296,7 +345,7 @@ async function parseAudio(buffer, mime, ctx, lang) {
   if (GROQ_KEY) {
     try {
       const transcript = await groqTranscribe(buffer, mime, ctx, lang);
-      if (!transcript) return { transcript: '', lines: [], unmatched: [], engine: 'groq' };
+      if (!transcript) return { transcript: '', lines: [], new_items: [], unmatched: [], engine: 'groq' };
       return await parseText(transcript, ctx);
     } catch (e) { errors.push(e.message); }
   }
