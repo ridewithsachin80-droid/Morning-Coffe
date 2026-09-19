@@ -50,7 +50,26 @@ app.get('/manifest.webmanifest', (req, res) => {
 });
 // The service worker must never be served stale either
 app.get('/sw.js', (req, res, next) => { res.set('Cache-Control', 'no-cache'); next(); });
-app.use(express.static(path.join(__dirname, 'public')));
+// ── App version ──
+// A fingerprint of everything that ships. It is stamped into the page when served and sent on every API
+// reply, so a phone still running yesterday's page finds out on its very next tap and is asked to refresh.
+const APP_VERSION = (() => {
+  const fs = require('fs'), h = crypto.createHash('sha1');
+  const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+    const fp = path.join(dir, f.name);
+    if (f.isDirectory()) walk(fp); else h.update(f.name).update(fs.readFileSync(fp));
+  });
+  walk(path.join(__dirname, 'public'));
+  ['server.js', 'ai.js', 'db/schema.sql'].forEach(f => h.update(fs.readFileSync(path.join(__dirname, f))));
+  return h.digest('hex').slice(0, 12);
+})();
+const INDEX_HTML = require('fs').readFileSync(path.join(__dirname, 'public/index.html'), 'utf8').replace('__APP_VERSION__', APP_VERSION);
+const sendIndex = (req, res) => res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }).send(INDEX_HTML);
+
+app.use('/api', (req, res, next) => { res.set('X-App-Version', APP_VERSION); next(); });
+app.get('/api/version', (req, res) => res.set('Cache-Control', 'no-store').json({ version: APP_VERSION }));
+app.get(['/', '/index.html'], sendIndex);
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // ── DB INIT with retry ──
 async function initDB(retries = 8, delay = 3000) {
@@ -784,7 +803,7 @@ app.post('/api/ai/voice', auth, aiLimit,
   });
 
 // ── CATCH-ALL ──
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
+app.get('*', sendIndex);
 
 // ── START ──
 const PORT = process.env.PORT || 3000;

@@ -52,6 +52,19 @@ primary actions, jade/amber/rose for paid/partial/errors. The UpScale gradient a
 around the AI mic. All colours are CSS variables at the top of `public/index.html` (`--gold`, `--surface`, …).
 Fonts: Instrument Serif (titles, amounts) + Hanken Grotesk (UI). Printing falls back to a light scheme.
 
+## 🔄 Updates — phones can't stay on an old version
+The server fingerprints everything it ships (`APP_VERSION`), stamps it into the page and sends it on every API
+reply (`X-App-Version`). A phone running an older page notices on its next tap, on returning to the app, or within
+5 minutes, and shows **"A new version is ready → Update now"** with no way to dismiss it. It waits politely if the
+person is mid-recording or has a sheet open. Update clears caches, reloads, and keeps them signed in. The reload
+also re-reads the manifest, which is what lets Android pick up a new app icon (Chrome asks the user to confirm
+icon changes once — see below).
+
+## 🎙️ Listening
+The mic waits up to 12 s for the first word, then keeps listening until **3.5 s of silence** (with an
+"Anything else? Searching in 3…" countdown), so people can think mid-sentence. Tap the button to finish sooner.
+Tune `AI_SILENCE_MS` / `AI_FIRST_WORD_MS` / `AI_MAX_MS` at the top of the AI section in `public/index.html`.
+
 ## 📱 Install as an app (own icon, no Chrome badge)
 
 The app ships a web manifest, icon set (`public/icons/`, from `icon.svg`) and a service worker, so Chrome

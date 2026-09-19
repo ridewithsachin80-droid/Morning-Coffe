@@ -577,6 +577,15 @@ option{background:var(--raised);color:var(--ceramic);}
   </div>
 </div>
 
+<div class="modal-bg" id="updateModal" style="z-index:900;">
+  <div class="modal" style="max-width:380px;text-align:center;">
+    <img src="/icons/icon.svg" alt="" style="width:76px;height:76px;border-radius:20px;box-shadow:0 0 0 1px var(--line-strong),0 16px 36px rgba(0,0,0,.6);margin-bottom:12px;">
+    <div class="modal-title" style="margin-bottom:6px;">A new version is ready</div>
+    <p class="text-muted" style="font-size:.88rem;line-height:1.5;">Morning Accounts has been updated. Refresh to get the latest features and fixes — your tab and bills are safe.</p>
+    <button class="btn btn-primary" id="updateNowBtn" style="width:100%;justify-content:center;margin-top:16px;padding:13px;font-size:.95rem;" onclick="appUpdateNow()">Update now</button>
+  </div>
+</div>
+
 <div class="modal-bg" id="aiAnswerModal">
   <div class="modal" style="max-width:480px;">
     <div class="modal-title" id="aiAnswerTitle"></div>
@@ -614,6 +623,10 @@ option{background:var(--raised);color:var(--ceramic);}
 <div class="toast" id="toast" style="display:none;"></div>
 
 <script>
+// Version this page was built from — the server stamps it in when it serves the page
+const APP_VERSION = '__APP_VERSION__';
+// tidy the cache-busting ?v= left behind by "Update now"
+try { const u = new URL(location.href); if (u.searchParams.has('v')) { u.searchParams.delete('v'); history.replaceState(null, '', u.pathname + (u.search || '')); } } catch (e) {}
 // PWA: register the service worker so Android installs this as a real app (own icon, no Chrome badge)
 if ('serviceWorker' in navigator) window.addEventListener('load', async () => {
   try {
@@ -640,10 +653,42 @@ async function api(method, path, body) {
   const opts = { method, headers:{ 'Content-Type':'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
+  appVersionSeen(r.headers.get('X-App-Version'));   // every API reply tells us which version is live
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || 'Request failed');
   return d;
 }
+
+
+// ════════════════════════════════════════════════════════
+// APP UPDATES — a new deploy must be picked up, not ignored
+// ════════════════════════════════════════════════════════
+let appUpdatePending = false;
+function appVersionSeen(v) {
+  if (!v || APP_VERSION.startsWith('__') || v === APP_VERSION || appUpdatePending) return;
+  appUpdatePending = true; appShowUpdate();
+}
+function appShowUpdate() {
+  // never interrupt someone mid-sentence or mid-confirmation: wait until they're done, then insist
+  const busy = (typeof aiState !== 'undefined' && aiState !== 'idle') || document.querySelector('.modal-bg.open:not(#updateModal)');
+  if (busy) return setTimeout(appShowUpdate, 2500);
+  openModal('updateModal');     // no close button on purpose
+}
+async function appCheckVersion() {
+  try { const r = await fetch('/api/version', { cache:'no-store' }); appVersionSeen((await r.json()).version); } catch (e) {}
+}
+async function appUpdateNow() {
+  const b = document.getElementById('updateNowBtn'); b.disabled = true; b.textContent = 'Updating…';
+  try {
+    if ('serviceWorker' in navigator) { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update().catch(()=>{}); }
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+  } catch (e) {}
+  // cache-busting param guarantees the fresh page (and its manifest → new app icon) is what loads
+  location.replace('/?v=' + Date.now());
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') appCheckVersion(); });
+window.addEventListener('online', appCheckVersion);
+setInterval(appCheckVersion, 5 * 60 * 1000);
 
 // ════════════════════════════════════════════════════════
 // UTILS
@@ -909,8 +954,9 @@ async function submitItems() {
 // ════════════════════════════════════════════════════════
 // AI ORDER  (voice + typed → confirm → tab)
 // ════════════════════════════════════════════════════════
-const AI_MAX_MS = 20000;         // hard stop
-const AI_SILENCE_MS = 1700;      // stop this long after you finish talking
+const AI_MAX_MS = 45000;         // hard stop
+const AI_SILENCE_MS = 3500;      // keep listening this long after the last word, so people can think mid-sentence
+const AI_FIRST_WORD_MS = 12000;  // time allowed to think before saying anything at all
 let aiCaps = null;               // { stt, llm } from the server
 let aiMembers = [];              // [{id,name}] for the "for whom" picker
 let aiLines = [];                // lines awaiting confirmation
@@ -986,7 +1032,7 @@ async function aiStartRecording() {
   };
   aiRec.start();
   aiSetState('rec');
-  aiSetStatus('Listening…', 'Tap again when you’re done — or just stop talking');
+  aiSetStatus('Listening…', 'Take your time — I wait a few seconds after you stop. Tap to finish now.');
   if (navigator.vibrate) navigator.vibrate(30);
   aiTimers.push(setTimeout(aiStopRecording, AI_MAX_MS));
 
@@ -1007,8 +1053,12 @@ async function aiStartRecording() {
       const loud = rms > Math.max(0.02, floor*2);
       if (loud) { lastLoud = now; heardSpeech = true; }
       ring.style.transform = `scale(${1 + Math.min(rms*6, .45)})`;
-      if (heardSpeech && now - lastLoud > AI_SILENCE_MS) return aiStopRecording();
-      if (!heardSpeech && now - t0 > 7000) return aiStopRecording();
+      const quiet = now - lastLoud;
+      if (heardSpeech && quiet > AI_SILENCE_MS) return aiStopRecording();
+      if (!heardSpeech && now - t0 > AI_FIRST_WORD_MS) return aiStopRecording();
+      // after a 1s pause, show a gentle countdown so they know there's still time to add more
+      if (heardSpeech && quiet > 1000) aiSetStatus('Anything else?', `Searching in ${Math.ceil((AI_SILENCE_MS - quiet)/1000)}… keep talking to add more`);
+      else if (heardSpeech) aiSetStatus('Listening…', 'Take your time — I wait a few seconds after you stop. Tap to finish now.');
       aiRaf = requestAnimationFrame(tick);
     };
     aiRaf = requestAnimationFrame(tick);
@@ -1049,15 +1099,20 @@ function aiStartDictation() {
   const lang = document.getElementById('aiLang').value;
   const r = aiSpeechRec = new SR();
   r.lang = lang==='kn' ? 'kn-IN' : lang==='hi' ? 'hi-IN' : 'en-IN';
-  r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
-  let finalText = '';
-  r.onstart  = () => { aiSetState('rec'); aiSetStatus('Listening…','Speak now'); };
+  r.interimResults = true; r.maxAlternatives = 1; r.continuous = true;   // don't cut off at the first pause
+  let finalText = '', quietTimer = null, firstTimer = null;
+  const stopSoon = ms => { clearTimeout(quietTimer); quietTimer = setTimeout(() => { try { r.stop(); } catch(e){} }, ms); };
+  r.onstart  = () => { aiSetState('rec'); aiSetStatus('Listening…','Take your time — I wait a few seconds after you stop.');
+                       firstTimer = setTimeout(() => { if (!finalText) try { r.stop(); } catch(e){} }, AI_FIRST_WORD_MS);
+                       aiTimers.push(setTimeout(() => { try { r.stop(); } catch(e){} }, AI_MAX_MS)); };
   r.onresult = ev => {
     let txt=''; for (const res of ev.results) txt += res[0].transcript+' ';
     finalText = txt.trim(); aiSetStatus('Listening…', '“'+finalText+'”');
+    stopSoon(AI_SILENCE_MS);             // every new word restarts the wait
   };
   r.onerror  = ev => { if (ev.error==='not-allowed') toast('🎙️ Allow microphone access to order by voice'); else if (ev.error!=='no-speech' && ev.error!=='aborted') toast('Voice error: '+ev.error); };
-  r.onend    = () => { aiSpeechRec = null; if (finalText) { aiSource='voice'; aiParseText(finalText); } else { aiSetState('idle'); } };
+  r.onend    = () => { clearTimeout(quietTimer); clearTimeout(firstTimer); aiTimers.forEach(clearTimeout); aiTimers = [];
+                       aiSpeechRec = null; if (finalText) { aiSource='voice'; aiParseText(finalText); } else { aiSetState('idle'); } };
   try { r.start(); } catch(e) { aiSpeechRec=null; toast('Could not start microphone'); }
 }
 
