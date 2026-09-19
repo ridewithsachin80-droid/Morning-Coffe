@@ -137,7 +137,15 @@ served with a versioned, cache-forever URL. Photos show on the Add Items cards a
 ### 💼 Accounts — collect from members, close the month
 **Accounts** tab (everyone can read; only admin records money).
 
-- **Member balance = money they put in − what they consumed.** "Put in" = cash/UPI you received from them
+- **How the bill is shared** is a per-month setting (admin), because whoever walks to the shop usually enters
+  the whole group's order, so lines under a member's name are not a reliable record of who consumed what:
+  - **Equal split** *(default)* — the month's bill ÷ the members ticked as sharing that month (whole rupees;
+    the odd rupee rotates). Untick anyone who was away.
+  - **As entered** — each member is charged the lines recorded against their name.
+  - **Kitty only** — nobody is charged individually; you just track money in, money out and the balance in hand.
+  The choice applies to that month and onward until changed. Earlier months keep their own setting, so
+  brought-forward balances don't shift when you change the method later.
+- **Member balance = money they put in − their share.** "Put in" = cash/UPI you received from them
   (**＋ Receive money**) + anything they paid the shop from their own pocket. Negative = to pay, positive = credit.
   Balances carry forward month to month ("brought forward").
 - **Kitty in hand = everything collected − payments to the shop made from the kitty.**

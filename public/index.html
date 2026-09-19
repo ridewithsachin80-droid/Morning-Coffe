@@ -342,6 +342,9 @@ option{background:var(--raised);color:var(--ceramic);}
 .stmt-line .b{display:block;font-size:.7rem;color:var(--muted);font-weight:400;}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:.86rem;color:var(--ceramic-dim);}
 .kv b{color:var(--ceramic);font-weight:600;}
+.chip{border:1px solid var(--line-strong);background:transparent;color:var(--muted);border-radius:20px;padding:6px 12px;font-size:.78rem;font-weight:600;cursor:pointer;}
+.chip.on{border-color:rgba(207,163,73,.5);background:var(--gold-wash);color:var(--gold-hi);}
+.chip:disabled{cursor:default;}
 </style>
 </head>
 <body>
@@ -1744,13 +1747,14 @@ async function loadAccounts() {
   cont.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   try {
     const a = accData = await api('GET', `/api/accounts?month=${accMonthStr()}`);
-    const t = a.totals, me = a.members.find(m => m.id === currentUser.memberId);
-    const rows = a.members.slice().sort((x, y) => x.closing - y.closing).map(m => `
+    const t = a.totals, me = a.members.find(m => m.id === currentUser.memberId), kittyOnly = a.split.mode === 'kitty';
+    const rows = a.members.slice().sort((x, y) => kittyOnly ? x.name.localeCompare(y.name) : x.closing - y.closing).map(m => `
       <div class="acc-row" onclick="openStatement(${m.id})">
         <div class="member-avatar">${initials(m.name)}</div>
         <div><div class="acc-name">${esc(m.name)}${m.is_active?'':' <span class="badge badge-off">inactive</span>'}</div>
-          <div class="acc-sub">Had ${inr(m.consumed)} · put in ${inr(m.collected + m.paid_shop)}${m.opening ? ` · ${m.opening<0?'brought forward due':'brought forward credit'} ${inr(Math.abs(m.opening))}` : ''}</div></div>
-        <div class="acc-bal ${balCls(m.closing)}"><div class="n">${inr(Math.abs(m.closing))}</div><div class="l">${balLbl(m.closing)}</div></div>
+          <div class="acc-sub">${kittyOnly ? '' : (a.split.mode==='equal' ? (m.shares ? 'Share '+inr(m.share) : 'Not sharing this month') : 'Had '+inr(m.share)) + ' · '}put in ${inr(m.collected + m.paid_shop)}${m.opening ? ` · brought forward ${s_bal(m.opening)}` : ''}</div></div>
+        ${kittyOnly ? `<div class="acc-bal credit"><div class="n">${inr(m.collected + m.paid_shop)}</div><div class="l">put in</div></div>`
+                    : `<div class="acc-bal ${balCls(m.closing)}"><div class="n">${inr(Math.abs(m.closing))}</div><div class="l">${balLbl(m.closing)}</div></div>`}
       </div>`).join('');
     const colls = a.collections.map(c => `
       <div class="pay-hist-row">
@@ -1761,10 +1765,11 @@ async function loadAccounts() {
       </div>`).join('');
 
     cont.innerHTML = `
-      ${me ? `<div class="pay-banner ${me.closing < -0.009 ? 'partial' : 'paid'}" style="cursor:pointer;" onclick="openStatement(${me.id})">
+      ${me && !kittyOnly ? `<div class="pay-banner ${me.closing < -0.009 ? 'partial' : 'paid'}" style="cursor:pointer;" onclick="openStatement(${me.id})">
         <h2>${me.closing < -0.009 ? 'You owe the group' : me.closing > 0.009 ? 'You’re in credit' : 'You’re all settled'}</h2>
         <div class="pay-banner-total">${inr(Math.abs(me.closing))}</div>
-        <div style="font-size:.82rem;color:var(--muted);">${monthLabel(a.month)} · had ${inr(me.consumed)} · put in ${inr(me.collected + me.paid_shop)} · tap for your statement</div></div>` : ''}
+        <div style="font-size:.82rem;color:var(--muted);">${monthLabel(a.month)} · your share ${inr(me.share)} · put in ${inr(me.collected + me.paid_shop)} · tap for your statement</div></div>` : ''}
+      ${splitCard(a)}
       <div class="stats-grid">
         <div class="stat-card sc1"><div class="stat-num">${inr(t.consumed)}</div><div class="stat-lbl">Consumed in ${monthLabel(a.month).split(' ')[0]}</div></div>
         <div class="stat-card sc1"><div class="stat-num">${inr(t.collected)}</div><div class="stat-lbl">Collected from members</div></div>
@@ -1772,11 +1777,12 @@ async function loadAccounts() {
         <div class="stat-card sc2"><div class="stat-num">${inr(a.kitty.inHand)}</div><div class="stat-lbl">Kitty in hand now</div></div>
       </div>
       <div class="card">
-        <div class="card-title"><span>Members</span><span class="text-muted" style="font-family:var(--sans);">balance at end of ${monthLabel(a.month).split(' ')[0]}</span></div>
+        <div class="card-title"><span>Members</span><span class="text-muted" style="font-family:var(--sans);">${kittyOnly ? 'money put in' : 'balance at end of ' + monthLabel(a.month).split(' ')[0]}</span></div>
         ${rows || '<div class="empty-state"><p>No activity yet</p></div>'}
         <div class="divider"></div>
+        ${kittyOnly ? `<div class="kv"><span>Put in by everyone this month</span><b>${inr(t.collected + t.paid_shop)}</b></div>` : `
         <div class="kv"><span>Still to collect from members</span><b style="color:var(--rose);">${inr(t.owed)}</b></div>
-        <div class="kv"><span>Members in credit</span><b style="color:var(--jade);">${inr(t.credit)}</b></div>
+        <div class="kv"><span>Members in credit</span><b style="color:var(--jade);">${inr(t.credit)}</b></div>`}
       </div>
       <div class="card">
         <div class="card-title">Where the money stands</div>
@@ -1798,6 +1804,37 @@ async function loadAccounts() {
         <button class="btn btn-ghost" onclick="window.print()">🖨️ Print / PDF</button>
       </div>`;
   } catch (e) { cont.innerHTML = `<div class="empty-state"><p>${esc(e.message)}</p></div>`; }
+}
+
+
+// ── how this month's bill is shared ──
+const SPLIT_INFO = {
+  equal:   ['Equal split',  'The month’s bill is divided equally between the members below — it doesn’t matter who entered what.'],
+  entered: ['As entered',   'Each member is charged the lines recorded against their name. Only accurate if every order is entered for the right person.'],
+  kitty:   ['Kitty only',   'No one is charged individually. You just track money in, money paid to the shop, and the balance in hand.'],
+};
+function splitCard(a) {
+  const sp = a.split, admin = currentUser.isAdmin;
+  const seg = admin ? `<div class="seg" style="margin-bottom:10px;">${Object.keys(SPLIT_INFO).map(k =>
+      `<button class="${sp.mode===k?'on':''}" onclick="setSplit('${k}')">${SPLIT_INFO[k][0]}</button>`).join('')}</div>` : '';
+  const chips = sp.mode === 'equal' ? `<div class="flex" style="flex-wrap:wrap;gap:6px;margin-top:10px;">${a.members.filter(m => m.is_active || m.shares).map(m =>
+      `<button class="chip ${m.shares?'on':''}" ${admin?`onclick="toggleSharer(${m.id})"`:'disabled'}>${m.shares?'✓ ':''}${esc(m.name)}</button>`).join('')}</div>
+      <div class="kv" style="margin-top:10px;"><span>${inr(sp.bill)} ÷ ${sp.member_ids.length} member${sp.member_ids.length>1?'s':''}</span><b style="color:var(--gold-hi);">≈ ${inr(sp.perHead)} each</b></div>` : '';
+  return `<div class="card"><div class="card-title"><span>How the bill is shared</span>${admin?'':`<span class="badge badge-open">${SPLIT_INFO[sp.mode][0]}</span>`}</div>
+    ${seg}<p class="text-muted">${SPLIT_INFO[sp.mode][1]}</p>${chips}
+    ${admin ? `<p class="text-muted" style="margin-top:8px;font-size:.72rem;">Applies to ${monthLabel(a.month)} and later months until you change it.</p>` : ''}</div>`;
+}
+async function setSplit(mode, ids) {
+  try {
+    await api('PUT', '/api/accounts/split', { month: accMonthStr(), mode, member_ids: ids || (mode === 'equal' && accData ? accData.split.member_ids : null) });
+    loadAccounts();
+  } catch (e) { toast('Error: ' + e.message); }
+}
+function toggleSharer(id) {
+  const cur = new Set(accData.split.member_ids);
+  cur.has(id) ? cur.delete(id) : cur.add(id);
+  if (!cur.size) return toast('At least one member has to share the bill');
+  setSplit('equal', [...cur]);
 }
 
 // ── receive / refund ──
@@ -1823,7 +1860,7 @@ async function openCollect(pre = {}) {
 }
 function collectMemberChanged(prefill = true) {
   const id = +document.getElementById('collectMember').value, m = accData && accData.members.find(x => x.id === id), el = document.getElementById('collectDue');
-  if (!m) { el.textContent = ''; return; }
+  if (!m || (accData.split && accData.split.mode === 'kitty')) { el.textContent = ''; return; }
   el.innerHTML = m.closing < -0.009 ? `Owes <b style="color:var(--rose);">${inr(-m.closing)}</b> as of ${monthLabel(accData.month)}` : m.closing > 0.009 ? `In credit by <b style="color:var(--jade);">${inr(m.closing)}</b>` : 'All settled';
   if (prefill && collectState.kind === 'receive' && m.closing < -0.009) document.getElementById('collectAmount').value = Math.ceil(-m.closing);
 }
@@ -1856,12 +1893,13 @@ async function openStatement(memberId) {
     const s = stmtData = await api('GET', `/api/accounts/member/${memberId}?month=${accMonthStr()}`);
     const lines = s.lines.map(l => `<div class="stmt-line">
         <span class="d">${new Date(l.date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>
-        <span>${l.kind==='consumed'?'':(l.kind==='refund'?'↩︎ Refund · ':l.kind==='collected'?'💵 Received · ':'🏪 ')}${esc(l.label)}</span>
+        <span>${l.kind==='consumed'?'':l.kind==='share'?'☕ ':(l.kind==='refund'?'↩︎ Refund · ':l.kind==='collected'?'💵 Received · ':'🏪 ')}${esc(l.label)}</span>
         <span class="a" style="color:${l.amount<0?'var(--ceramic)':'var(--jade)'};">${l.amount<0?'−':'+'}${inr(Math.abs(l.amount))}<span class="b">bal ${s_bal(l.balance)}</span></span></div>`).join('');
     const actions = [{ label:'📤 Share', cls:'btn-primary', run: shareStatement }];
-    if (currentUser.isAdmin && s.closing < -0.009) actions.unshift({ label:`Receive ${inr(Math.ceil(-s.closing))}`, cls:'btn-ghost', run: () => openCollect({ member_id:s.member.id, amount:Math.ceil(-s.closing) }) });
+    if (currentUser.isAdmin && s.mode !== 'kitty' && s.closing < -0.009) actions.unshift({ label:`Receive ${inr(Math.ceil(-s.closing))}`, cls:'btn-ghost', run: () => openCollect({ member_id:s.member.id, amount:Math.ceil(-s.closing) }) });
     aiAnswer(`${s.member.name} — ${monthLabel(s.month)}`,
-      `<div class="acc-bal ${balCls(s.closing)}" style="text-align:left;margin-bottom:10px;"><div class="n" style="font-size:2.4rem;">${inr(Math.abs(s.closing))}</div><div class="l" style="font-size:.8rem;">${balLbl(s.closing)} at month end</div></div>
+      (s.mode === 'kitty' ? `<p class="text-muted" style="margin-bottom:10px;">This month is kitty-only: members aren’t charged individually, so this shows only what ${esc(s.member.name)} put in.</p>` :
+       `<div class="acc-bal ${balCls(s.closing)}" style="text-align:left;margin-bottom:10px;"><div class="n" style="font-size:2.4rem;">${inr(Math.abs(s.closing))}</div><div class="l" style="font-size:.8rem;">${balLbl(s.closing)} at month end</div></div>`) + `
        <div class="kv"><span>Brought forward</span><b>${s_bal(s.opening)}</b></div>
        ${lines || '<p class="text-muted" style="padding:10px 0;">No activity this month.</p>'}`, actions);
   } catch (e) { toast('Error: ' + e.message); }
@@ -1876,23 +1914,27 @@ function shareText(title, text) {
 function shareStatement() {
   const s = stmtData; if (!s) return;
   const L = [`☕ Morning Accounts — ${s.member.name}`, monthLabel(s.month), '', `Brought forward: ${s_bal(s.opening)}`];
-  s.lines.forEach(l => L.push(`${new Date(l.date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}  ${l.kind==='consumed'?l.label:(l.kind==='collected'?'Received ('+l.label+')':l.kind==='refund'?'Refund ('+l.label+')':l.label)}  ${l.amount<0?'-':'+'}₹${Math.abs(l.amount)}`));
-  L.push('', s.closing < -0.009 ? `👉 To pay: ${inr(-s.closing)}` : s.closing > 0.009 ? `✅ In credit: ${inr(s.closing)}` : '✅ All settled');
+  s.lines.forEach(l => L.push(`${new Date(l.date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}  ${(l.kind==='consumed'||l.kind==='share')?l.label:(l.kind==='collected'?'Received ('+l.label+')':l.kind==='refund'?'Refund ('+l.label+')':l.label)}  ${l.amount<0?'-':'+'}₹${Math.abs(l.amount)}`));
+  if (s.mode !== 'kitty') L.push('', s.closing < -0.009 ? `👉 To pay: ${inr(-s.closing)}` : s.closing > 0.009 ? `✅ In credit: ${inr(s.closing)}` : '✅ All settled');
   shareText('Coffee statement', L.join('\n'));
 }
 function shareAccounts() {
   const a = accData; if (!a) return;
   const L = [`☕ Morning Accounts — ${monthLabel(a.month)}`, '', `Consumed: ${inr(a.totals.consumed)}`, `Collected: ${inr(a.totals.collected)}`,
-    `Paid to shop: ${inr(a.shop.paidFromKitty + a.shop.paidByMembers + a.shop.paidByOthers)}`, `Kitty in hand: ${inr(a.kitty.inHand)}`, `Unpaid at shop: ${inr(a.shop.outstanding)}`, '', 'Balances:'];
-  a.members.slice().sort((x, y) => x.closing - y.closing).forEach(m => L.push(`• ${m.name}: ${m.closing < -0.009 ? 'to pay ' + inr(-m.closing) : m.closing > 0.009 ? 'credit ' + inr(m.closing) : 'settled'}  (had ${inr(m.consumed)}, put in ${inr(m.collected + m.paid_shop)})`));
+    `Paid to shop: ${inr(a.shop.paidFromKitty + a.shop.paidByMembers + a.shop.paidByOthers)}`, `Kitty in hand: ${inr(a.kitty.inHand)}`, `Unpaid at shop: ${inr(a.shop.outstanding)}`, '',
+    a.split.mode === 'equal' ? `Split equally: ${inr(a.split.bill)} ÷ ${a.split.member_ids.length} ≈ ${inr(a.split.perHead)} each` : a.split.mode === 'entered' ? 'Split: by what was entered for each member' : 'Kitty only — no individual split', ''];
+  a.members.slice().sort((x, y) => x.closing - y.closing).forEach(m => L.push(a.split.mode === 'kitty'
+    ? `• ${m.name}: put in ${inr(m.collected + m.paid_shop)}`
+    : `• ${m.name}: ${m.closing < -0.009 ? 'to pay ' + inr(-m.closing) : m.closing > 0.009 ? 'credit ' + inr(m.closing) : 'settled'}  (share ${inr(m.share)}, put in ${inr(m.collected + m.paid_shop)})`));
   shareText('Coffee accounts', L.join('\n'));
 }
 function downloadAccountsCsv() {
   const a = accData; if (!a) return;
   const q = v => `"${String(v).replace(/"/g,'""')}"`;
-  const rows = [['Member','Brought forward','Consumed','Given to kitty','Paid shop directly','Closing balance (− = to pay)'],
-    ...a.members.map(m => [m.name, m.opening, m.consumed, m.collected, m.paid_shop, m.closing]),
-    ['TOTAL', a.totals.opening, a.totals.consumed, a.totals.collected, a.totals.paid_shop, a.totals.closing], [],
+  const rows = [['Split method', a.split.mode === 'equal' ? `Equal: ${a.split.bill} / ${a.split.member_ids.length} members` : a.split.mode === 'entered' ? 'As entered per member' : 'Kitty only'], ['Month bill', a.split.bill], [],
+    ['Member','Brought forward','Share of bill','Entered under their name (info)','Given to kitty','Paid shop directly','Closing balance (− = to pay)'],
+    ...a.members.map(m => [m.name, m.opening, m.share, m.entered, m.collected, m.paid_shop, m.closing]),
+    ['TOTAL', a.totals.opening, a.totals.share, a.totals.consumed, a.totals.collected, a.totals.paid_shop, a.totals.closing], [],
     ['Kitty in hand', a.kitty.inHand], ['Unpaid at shop', a.shop.outstanding], ['Advance with shop', a.shop.advance], [],
     ['Date','Member','Amount','Mode','Note'], ...a.collections.map(c => [c.collected_on, c.member_name, c.amount, c.mode, c.note || ''])];
   const blob = new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\n')], { type:'text/csv' });

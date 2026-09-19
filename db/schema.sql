@@ -132,6 +132,15 @@ CREATE TABLE IF NOT EXISTS member_collections (
 CREATE INDEX IF NOT EXISTS idx_collections_member ON member_collections(member_id);
 CREATE INDEX IF NOT EXISTS idx_collections_date   ON member_collections(collected_on);
 
+-- How each month's bill is shared between members: equal | entered | kitty  (a month without a row inherits the previous one)
+CREATE TABLE IF NOT EXISTS account_months (
+  month      CHAR(7) PRIMARY KEY,            -- 'YYYY-MM'
+  mode       VARCHAR(10) NOT NULL DEFAULT 'equal',
+  member_ids INT[],                          -- who shares an equal split; NULL = every active member
+  updated_by INT REFERENCES members(id),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Who really funded each payment to the shop: a member's own pocket (credited to them) or the kitty
 ALTER TABLE session_payments ADD COLUMN IF NOT EXISTS payer_member_id INT REFERENCES members(id);
 ALTER TABLE session_payments ADD COLUMN IF NOT EXISTS from_kitty      BOOLEAN NOT NULL DEFAULT FALSE;

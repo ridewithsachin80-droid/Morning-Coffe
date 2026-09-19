@@ -797,47 +797,86 @@ function monthRange(month) {
   return { month: `${y}-${pad(mo + 1)}`, from: `${y}-${pad(mo + 1)}-01`, to: `${y}-${pad(mo + 1)}-${pad(last)}` };
 }
 
+// ── How a month's bill is shared ──
+// Whoever walks to the shop usually enters the whole group's order, so "who entered / who it was entered for"
+// is not a reliable record of who consumed what. Each month therefore has a split mode:
+//   equal   – the month's total bill ÷ the members sharing that month            (default)
+//   entered – each member is charged the lines recorded against their name
+//   kitty   – no per-member charge at all: just money in, money out, balance in hand
+// A month with no explicit setting inherits the most recent earlier one.
+const SPLIT_MODES = ['equal', 'entered', 'kitty'];
+const monthOf = d => dateStr(d).slice(0, 7);
+function nextMonth(m) { const [y, mo] = m.split('-').map(Number); return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; }
+
+async function computeLedger(targetMonth) {
+  const { to } = monthRange(targetMonth);
+  const [{ rows: members }, { rows: cons }, { rows: puts }, { rows: settings }] = await Promise.all([
+    pool.query('SELECT id,name,is_active,is_admin FROM members ORDER BY name'),
+    pool.query(
+      `SELECT to_char(ds.date,'YYYY-MM') AS m, te.member_id, SUM(te.amount) AS amt
+       FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id WHERE ds.date <= $1 GROUP BY 1,2`, [to]),
+    pool.query(
+      `SELECT to_char(d,'YYYY-MM') AS m, member_id, SUM(kitty) AS kitty, SUM(shop) AS shop FROM (
+         SELECT collected_on AS d, member_id, amount AS kitty, 0 AS shop FROM member_collections
+         UNION ALL SELECT (paid_at    AT TIME ZONE $2)::date, payer_member_id, 0, amount FROM session_payments WHERE payer_member_id IS NOT NULL
+         UNION ALL SELECT (created_at AT TIME ZONE $2)::date, payer_member_id, 0, amount FROM advance_ledger   WHERE payer_member_id IS NOT NULL AND amount > 0
+       ) x WHERE d <= $1 GROUP BY 1,2`, [to, TZ]),
+    pool.query('SELECT month, mode, member_ids FROM account_months ORDER BY month'),
+  ]);
+
+  const months = [...new Set([...cons.map(r => r.m), ...puts.map(r => r.m), targetMonth])].sort();
+  const allMonths = []; for (let m = months[0]; m <= targetMonth; m = nextMonth(m)) allMonths.push(m);
+  const activeIds = members.filter(m => m.is_active).map(m => m.id);
+  const bal = new Map(members.map(m => [m.id, 0]));
+  let inherited = { mode: 'equal', member_ids: null }, out = null;
+
+  for (const m of allMonths) {
+    const own = settings.find(x => x.month === m);
+    if (own) inherited = { mode: own.mode, member_ids: own.member_ids };
+    const mode = inherited.mode;
+    const entered = new Map(), kitty = new Map(), shop = new Map();
+    cons.filter(r => r.m === m).forEach(r => entered.set(r.member_id, r2(r.amt)));
+    puts.filter(r => r.m === m).forEach(r => { kitty.set(r.member_id, r2(r.kitty)); shop.set(r.member_id, r2(r.shop)); });
+    const total = r2([...entered.values()].reduce((t, v) => t + v, 0));
+
+    // who shares an equal split: the chosen list, else every active member
+    let sharers = (inherited.member_ids && inherited.member_ids.length ? inherited.member_ids : activeIds).filter(id => bal.has(id));
+    if (!sharers.length) sharers = activeIds;
+    const share = new Map();
+    if (mode === 'entered') entered.forEach((v, id) => share.set(id, v));
+    else if (mode === 'equal' && sharers.length && total > 0) {
+      // whole rupees only: ₹419 ÷ 3 → 140, 140, 139 (the odd rupees rotate by month so it isn't always the same person)
+      const n = sharers.length, each = Math.floor(total / n), extra = Math.round(total - each * n);
+      const spin = parseInt(m.replace('-', ''), 10) % n;
+      sharers.forEach((id, i) => share.set(id, each + (((i - spin + n) % n) < Math.floor(extra) ? 1 : 0)));
+      const drift = r2(total - [...share.values()].reduce((t, v) => t + v, 0));          // paise, if the bill itself had any
+      if (drift) share.set(sharers[0], r2(share.get(sharers[0]) + drift));
+    }
+
+    const opening = new Map(bal);
+    members.forEach(mm => bal.set(mm.id, r2(bal.get(mm.id) + (kitty.get(mm.id) || 0) + (shop.get(mm.id) || 0) - (share.get(mm.id) || 0))));
+    if (m === targetMonth) out = { mode, sharers, explicit: !!own, total, opening, entered, kitty, shop, share, closing: new Map(bal) };
+  }
+  return { members, ...out };
+}
+
 app.get('/api/accounts', auth, async (req, res) => {
   try {
     const { month, from, to } = monthRange(req.query.month);
-    const { rows } = await pool.query(
-      `WITH c AS (   -- consumed
-         SELECT te.member_id,
-                SUM(te.amount) FILTER (WHERE ds.date <  $1)             AS before,
-                SUM(te.amount) FILTER (WHERE ds.date BETWEEN $1 AND $2) AS during
-         FROM tab_entries te JOIN daily_sessions ds ON ds.id = te.session_id WHERE ds.date <= $2 GROUP BY te.member_id),
-       k AS (        -- given to the kitty
-         SELECT member_id,
-                SUM(amount) FILTER (WHERE collected_on <  $1)             AS before,
-                SUM(amount) FILTER (WHERE collected_on BETWEEN $1 AND $2) AS during
-         FROM member_collections WHERE collected_on <= $2 GROUP BY member_id),
-       p AS (        -- paid the shop from their own pocket (incl. any overpayment that became shop advance)
-         SELECT payer_member_id AS member_id,
-                SUM(amount) FILTER (WHERE d <  $1)             AS before,
-                SUM(amount) FILTER (WHERE d BETWEEN $1 AND $2) AS during
-         FROM (SELECT payer_member_id, amount, (paid_at    AT TIME ZONE $3)::date AS d FROM session_payments WHERE payer_member_id IS NOT NULL
-               UNION ALL
-               SELECT payer_member_id, amount, (created_at AT TIME ZONE $3)::date AS d FROM advance_ledger   WHERE payer_member_id IS NOT NULL AND amount > 0) x
-         WHERE d <= $2 GROUP BY payer_member_id)
-       SELECT m.id, m.name, m.is_active, m.is_admin,
-              COALESCE(k.before,0) + COALESCE(p.before,0) - COALESCE(c.before,0) AS opening,
-              COALESCE(c.during,0) AS consumed, COALESCE(k.during,0) AS collected, COALESCE(p.during,0) AS paid_shop
-       FROM members m LEFT JOIN c ON c.member_id=m.id LEFT JOIN k ON k.member_id=m.id LEFT JOIN p ON p.member_id=m.id
-       ORDER BY m.name`, [from, to, TZ]);
-
-    const members = rows.map(m => {
-      const o = { id: m.id, name: m.name, is_active: m.is_active, is_admin: m.is_admin,
-                  opening: r2(m.opening), consumed: r2(m.consumed), collected: r2(m.collected), paid_shop: r2(m.paid_shop) };
-      o.closing = r2(o.opening + o.collected + o.paid_shop - o.consumed);
-      return o;
-    }).filter(m => m.is_active || m.opening || m.consumed || m.collected || m.paid_shop);
+    const L = await computeLedger(month);
+    const g = (map, id) => r2(map.get(id) || 0);
+    const members = L.members.map(m => ({
+      id: m.id, name: m.name, is_active: m.is_active, is_admin: m.is_admin, shares: L.sharers.includes(m.id),
+      opening: g(L.opening, m.id), share: g(L.share, m.id), entered: g(L.entered, m.id),
+      collected: g(L.kitty, m.id), paid_shop: g(L.shop, m.id), closing: g(L.closing, m.id),
+    })).filter(m => m.is_active || m.opening || m.share || m.entered || m.collected || m.paid_shop || m.closing);
 
     const sum = k => r2(members.reduce((t, m) => t + m[k], 0));
     const { rows: kt } = await pool.query(
       `SELECT (SELECT COALESCE(SUM(amount),0) FROM member_collections) AS collected,
               (SELECT COALESCE(SUM(amount),0) FROM session_payments WHERE from_kitty) +
               (SELECT COALESCE(SUM(amount),0) FROM advance_ledger   WHERE from_kitty AND amount > 0) AS spent`);
-    const { rows: mp } = await pool.query(   // everything handed to the shop this month, by source
+    const { rows: mp } = await pool.query(
       `SELECT COALESCE(SUM(amount) FILTER (WHERE from_kitty),0) AS kitty,
               COALESCE(SUM(amount) FILTER (WHERE payer_member_id IS NOT NULL),0) AS members,
               COALESCE(SUM(amount) FILTER (WHERE NOT from_kitty AND payer_member_id IS NULL),0) AS others
@@ -857,7 +896,9 @@ app.get('/api/accounts', auth, async (req, res) => {
 
     res.json({
       month, from, to, members,
-      totals: { opening: sum('opening'), consumed: sum('consumed'), collected: sum('collected'), paid_shop: sum('paid_shop'), closing: sum('closing'),
+      split: { mode: L.mode, member_ids: L.sharers, explicit: L.explicit, bill: L.total,
+               perHead: L.mode === 'equal' && L.sharers.length ? Math.round(L.total / L.sharers.length) : null },
+      totals: { opening: sum('opening'), consumed: L.total, share: sum('share'), collected: sum('collected'), paid_shop: sum('paid_shop'), closing: sum('closing'),
                 owed: r2(members.reduce((t, m) => t + (m.closing < 0 ? -m.closing : 0), 0)),
                 credit: r2(members.reduce((t, m) => t + (m.closing > 0 ? m.closing : 0), 0)) },
       kitty: { collected: r2(kt[0].collected), spent: r2(kt[0].spent), inHand: r2(kt[0].collected - kt[0].spent) },
@@ -865,6 +906,22 @@ app.get('/api/accounts', auth, async (req, res) => {
               outstanding: r2(out[0].pending), advance: await getAdvanceBalance() },
       collections: collections.map(c => ({ ...c, amount: r2(c.amount), collected_on: dateStr(c.collected_on) })),
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: choose how this month's bill is shared (applies to this month and onward until changed again)
+app.put('/api/accounts/split', auth, adminOnly, async (req, res) => {
+  try {
+    const { month } = monthRange(req.body.month);
+    const mode = SPLIT_MODES.includes(req.body.mode) ? req.body.mode : null;
+    if (!mode) return res.status(400).json({ error: 'Unknown split mode' });
+    let ids = Array.isArray(req.body.member_ids) ? [...new Set(req.body.member_ids.map(n => parseInt(n, 10)).filter(Number.isFinite))] : null;
+    if (mode === 'equal' && ids && !ids.length) return res.status(400).json({ error: 'Pick at least one member to share the bill' });
+    if (mode !== 'equal') ids = null;
+    await pool.query(
+      `INSERT INTO account_months (month, mode, member_ids, updated_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (month) DO UPDATE SET mode=$2, member_ids=$3, updated_by=$4, updated_at=NOW()`, [month, mode, ids, req.user.member_id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -879,19 +936,16 @@ app.get('/api/accounts/kitty', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// One member's statement for a month: every day they ate, every rupee they put in, running balance
+// One member's statement for a month, with running balance. What they are charged follows the month's split mode.
 app.get('/api/accounts/member/:id', auth, async (req, res) => {
   try {
     const { month, from, to } = monthRange(req.query.month);
     const id = parseInt(req.params.id, 10);
-    const { rows: mem } = await pool.query('SELECT id,name FROM members WHERE id=$1', [id]);
-    if (!mem.length) return res.status(404).json({ error: 'Member not found' });
-    const { rows: ob } = await pool.query(
-      `SELECT (SELECT COALESCE(SUM(amount),0) FROM member_collections WHERE member_id=$1 AND collected_on < $2)
-            + (SELECT COALESCE(SUM(amount),0) FROM session_payments WHERE payer_member_id=$1 AND (paid_at AT TIME ZONE $3)::date < $2)
-            + (SELECT COALESCE(SUM(amount),0) FROM advance_ledger WHERE payer_member_id=$1 AND amount>0 AND (created_at AT TIME ZONE $3)::date < $2)
-            - (SELECT COALESCE(SUM(te.amount),0) FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id WHERE te.member_id=$1 AND ds.date < $2) AS opening`,
-      [id, from, TZ]);
+    const L = await computeLedger(month);
+    const mem = L.members.find(m => m.id === id);
+    if (!mem) return res.status(404).json({ error: 'Member not found' });
+    const opening = r2(L.opening.get(id) || 0), share = r2(L.share.get(id) || 0);
+
     const { rows: tx } = await pool.query(
       `SELECT d, kind, label, amount FROM (
          SELECT d, 'consumed' AS kind, STRING_AGG(item_name || ' ×' || q, ', ' ORDER BY first_at) AS label, -SUM(a) AS amount, 1 AS ord
@@ -910,9 +964,19 @@ app.get('/api/accounts/member/:id', auth, async (req, res) => {
          SELECT (created_at AT TIME ZONE $4)::date, 'paid_shop', 'Paid the shop (advance)', amount, 3
          FROM advance_ledger WHERE payer_member_id=$1 AND amount>0 AND (created_at AT TIME ZONE $4)::date BETWEEN $2 AND $3
        ) t ORDER BY d, ord`, [id, from, to, TZ]);
-    let bal = r2(ob[0].opening);
-    const lines = tx.map(t => { bal = r2(bal + parseFloat(t.amount)); return { date: dateStr(t.d), kind: t.kind, label: t.label, amount: r2(t.amount), balance: bal }; });
-    res.json({ month, from, to, member: mem[0], opening: r2(ob[0].opening), lines, closing: bal });
+
+    // In "entered" mode the daily lines ARE the charge. Otherwise the charge is one share line for the month,
+    // and the lines recorded under their name are not part of the money at all.
+    let rowsTx = tx.map(t => ({ date: dateStr(t.d), kind: t.kind, label: t.label, amount: r2(t.amount) }));
+    if (L.mode !== 'entered') {
+      rowsTx = rowsTx.filter(t => t.kind !== 'consumed');
+      if (share > 0) rowsTx.push({ date: to, kind: 'share', amount: -share,
+        label: `Share of ${new Date(from + 'T12:00:00').toLocaleDateString('en-IN', { month: 'long' })} bill — ₹${L.total} ÷ ${L.sharers.length} member${L.sharers.length > 1 ? 's' : ''}` });
+      rowsTx.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    let bal = opening;
+    const lines = rowsTx.map(t => { bal = r2(bal + t.amount); return { ...t, balance: bal }; });
+    res.json({ month, from, to, member: { id: mem.id, name: mem.name }, mode: L.mode, opening, lines, closing: r2(L.closing.get(id) || 0) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
