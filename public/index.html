@@ -216,7 +216,9 @@ option{background:var(--raised);color:var(--ceramic);}
 .modal-actions .btn{padding:10px 14px;}
 
 /* ADMIN LISTS */
-.rate-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);}
+.rate-row{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;row-gap:8px;padding:10px 0;border-bottom:1px solid var(--line);}
+.rate-row>input.form-input{flex:1 1 calc(100% - 60px) !important;margin-right:0 !important;}
+.rate-row>.rate-input{margin-left:4px;}
 .rate-row:last-child{border-bottom:none;}
 .rate-input{width:64px;padding:7px 9px;text-align:center;border:1px solid var(--line-strong);border-radius:var(--r-sm);font-size:.9rem;background:var(--sunken);color:var(--gold-hi);}
 .rate-input:focus{outline:none;border-color:var(--gold);}
@@ -312,6 +314,34 @@ option{background:var(--raised);color:var(--ceramic);}
 .ans-eg{display:block;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 12px;margin-top:6px;color:var(--ceramic-dim);font-size:.86rem;cursor:pointer;}
 .ans-eg:hover{border-color:var(--gold);color:var(--gold-hi);}
 .ans-group{font-size:.76rem;color:var(--muted);margin:14px 0 2px;}
+
+/* ITEM PHOTOS */
+.item-pic{width:100%;aspect-ratio:4/3;border-radius:12px;object-fit:cover;display:block;margin-bottom:9px;background:var(--raised);}
+.item-pic.ph{display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:2rem;color:var(--gold-lo);background:radial-gradient(circle at 30% 25%,#2a221c,var(--raised));border:1px solid var(--line);}
+.item-thumb{width:44px;height:44px;border-radius:11px;object-fit:cover;flex-shrink:0;margin-right:8px;border:1px solid var(--line-strong);background:var(--raised);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1rem;overflow:hidden;}
+.item-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.row-thumb{width:24px;height:24px;border-radius:7px;object-fit:cover;vertical-align:middle;margin-right:8px;background:var(--raised);}
+.photo-preview{width:200px;height:150px;margin:0 auto 6px;border-radius:16px;overflow:hidden;border:1px solid var(--line-strong);background:var(--sunken);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.84rem;}
+.photo-preview img{width:100%;height:100%;object-fit:cover;}
+/* ACCOUNTS */
+.seg{display:flex;background:var(--sunken);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:14px;}
+.seg button{flex:1;border:none;background:transparent;color:var(--muted);padding:8px 6px;border-radius:9px;font-size:.78rem;font-weight:600;cursor:pointer;}
+.seg button.on{background:var(--raised);color:var(--gold-hi);box-shadow:0 0 0 1px var(--line-strong);}
+.acc-row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:8px;cursor:pointer;transition:border-color .2s;}
+.acc-row:hover{border-color:var(--line-strong);}
+.acc-name{font-weight:600;font-size:.95rem;}
+.acc-sub{font-size:.74rem;color:var(--muted);margin-top:2px;line-height:1.45;}
+.acc-bal{text-align:right;white-space:nowrap;}
+.acc-bal .n{font-family:var(--serif);font-size:1.45rem;line-height:1;}
+.acc-bal .l{font-size:.68rem;margin-top:3px;}
+.owes .n,.owes .l{color:var(--rose);} .credit .n,.credit .l{color:var(--jade);} .settled .n,.settled .l{color:var(--muted);}
+.stmt-line{display:grid;grid-template-columns:54px 1fr auto;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:.84rem;align-items:start;}
+.stmt-line:last-child{border-bottom:none;}
+.stmt-line .d{color:var(--muted);font-size:.74rem;padding-top:2px;}
+.stmt-line .a{text-align:right;white-space:nowrap;font-weight:600;}
+.stmt-line .b{display:block;font-size:.7rem;color:var(--muted);font-weight:400;}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;font-size:.86rem;color:var(--ceramic-dim);}
+.kv b{color:var(--ceramic);font-weight:600;}
 </style>
 </head>
 <body>
@@ -371,6 +401,7 @@ option{background:var(--raised);color:var(--ceramic);}
     <button class="nav-btn" onclick="showPage('addItems')">➕ Add Items</button>
     <button class="nav-btn" onclick="showPage('myTab')">🧾 My Tab</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
+    <button class="nav-btn" onclick="showPage('accounts')">💼 Accounts</button>
     <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
@@ -381,6 +412,7 @@ option{background:var(--raised);color:var(--ceramic);}
     <button class="nav-btn" onclick="showPage('members')">👥 Members</button>
     <button class="nav-btn" onclick="showPage('adminItems')">🍵 Items</button>
     <button class="nav-btn" onclick="showPage('history')">📅 History</button>
+    <button class="nav-btn" onclick="showPage('accounts')">💼 Accounts</button>
     <button class="nav-btn" onclick="showPage('report')">📊 Report</button>
   </div>
 
@@ -504,6 +536,19 @@ option{background:var(--raised);color:var(--ceramic);}
   </div>
 
   <!-- ══ REPORT (all members) ══ -->
+  <!-- ══ ACCOUNTS (everyone reads · admin records money) ══ -->
+  <div class="page" id="page-accounts">
+    <div class="flex-between" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;">
+      <div class="flex gap-8" style="align-items:center;">
+        <button class="btn btn-ghost btn-sm" onclick="accShiftMonth(-1)" aria-label="Previous month">‹</button>
+        <input type="month" class="form-input" id="accMonth" style="width:auto;padding:6px 10px;font-size:.86rem;" onchange="loadAccounts()">
+        <button class="btn btn-ghost btn-sm" onclick="accShiftMonth(1)" aria-label="Next month">›</button>
+      </div>
+      <button class="btn btn-primary btn-sm" id="accCollectBtn" style="display:none;" onclick="openCollect()">＋ Receive money</button>
+    </div>
+    <div id="accContent"></div>
+  </div>
+
   <div class="page" id="page-report">
     <div class="card">
       <div class="card-title">📊 Date-wise Report</div>
@@ -551,8 +596,10 @@ option{background:var(--raised);color:var(--ceramic);}
     <div id="billModalBody"></div>
     <div id="advanceApplyRow"></div>
     <div class="form-group" id="payAmountGroup" style="margin-top:10px;">
-      <label class="form-label">Payer name</label>
-      <input type="text" class="form-input" id="payerNameInput" placeholder="Who's paying?" style="margin-bottom:8px;">
+      <label class="form-label">Paid from</label>
+      <select class="form-input" id="payerSelect" style="margin-bottom:8px;" onchange="payerChanged()"></select>
+      <input type="text" class="form-input" id="payerNameInput" placeholder="Payer's name" style="margin-bottom:8px;display:none;">
+      <div class="text-muted" id="payerHint" style="margin:-2px 0 8px;font-size:.74rem;"></div>
       <label class="form-label">Amount to pay now <span style="text-transform:none;font-weight:400;">(paying more than pending is OK — the extra becomes advance credit)</span></label>
       <input type="number" class="form-input" id="payAmountInput" min="0" step="0.01" placeholder="0.00">
       <div class="flex gap-8" style="margin-top:6px;">
@@ -573,6 +620,43 @@ option{background:var(--raised);color:var(--ceramic);}
     <div id="advanceModalBody"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('advanceModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="collectModal">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-title" id="collectTitle">Receive money</div>
+    <div class="seg" id="collectKind">
+      <button class="on" data-k="receive" onclick="collectKind('receive')">Received from member</button>
+      <button data-k="refund" onclick="collectKind('refund')">Refund to member</button>
+    </div>
+    <div class="form-group"><label class="form-label">Member</label><select class="form-input" id="collectMember" onchange="collectMemberChanged()"></select>
+      <div class="text-muted" id="collectDue" style="margin-top:5px;font-size:.78rem;"></div></div>
+    <div class="flex gap-8">
+      <div class="form-group" style="flex:1;"><label class="form-label">Amount (₹)</label><input type="number" class="form-input" id="collectAmount" inputmode="decimal" min="1" step="1" placeholder="0"></div>
+      <div class="form-group" style="flex:1;"><label class="form-label">Mode</label><select class="form-input" id="collectMode"><option value="cash">Cash</option><option value="upi">UPI</option><option value="other">Other</option></select></div>
+    </div>
+    <div class="flex gap-8">
+      <div class="form-group" style="flex:1;"><label class="form-label">Date</label><input type="date" class="form-input" id="collectDate"></div>
+      <div class="form-group" style="flex:1.3;"><label class="form-label">Note (optional)</label><input type="text" class="form-input" id="collectNote" maxlength="200" placeholder="e.g. September"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('collectModal')">Cancel</button>
+      <button class="btn btn-primary" id="collectSaveBtn" onclick="saveCollect()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="photoModal">
+  <div class="modal" style="max-width:360px;text-align:center;">
+    <div class="modal-title" id="photoTitle">Item photo</div>
+    <div id="photoPreview" class="photo-preview"></div>
+    <input type="file" id="photoFile" accept="image/*" style="display:none;" onchange="photoPicked(this)">
+    <div class="modal-actions" style="justify-content:center;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="document.getElementById('photoFile').click()">📷 Choose / take photo</button>
+      <button class="btn btn-danger" id="photoRemoveBtn" onclick="photoRemove()">Remove</button>
+      <button class="btn btn-ghost" onclick="closeModal('photoModal')">Close</button>
     </div>
   </div>
 </div>
@@ -835,6 +919,7 @@ const PAGE_LOADERS = {
   adminItems: loadAdminItems,
   history:    loadHistory,
   report:     loadReport,
+  accounts:   loadAccounts,
 };
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -884,9 +969,11 @@ async function loadSessionStatus() {
 
 function renderQuickGrid() {
   const grid = document.getElementById('quickItemGrid');
+  const anyPics = allItems.some(i => i.has_image);   // no photos at all → keep the compact cards
   grid.innerHTML = allItems.map(it => {
     const qty = addQtys[it.id] || 0;
     return `<div class="item-btn ${qty>0?'selected':''}" id="ibtn-${it.id}">
+      ${anyPics ? itemPic(it) : ''}
       <div class="item-btn-name">${it.name}</div>
       <div class="item-btn-rate">₹${parseFloat(it.rate).toFixed(0)}</div>
       <div class="qty-ctrl">
@@ -1369,16 +1456,18 @@ const aiNeedAdmin = what => { if (currentUser.isAdmin) return true; toast(`Only 
 const aiItem = id => allItems.find(i => i.id === id);
 const aiMemberName = id => (aiMembers.find(m => m.id === id) || {}).name || '';
 
+const AI_ADMIN_EG = new Set(['Ravi gave 500', 'Collected 300 from Kiran by UPI']);
 const AI_EXAMPLES = [
   ['Order', ['Two coffee and one vada', 'One tea for Ravi', 'Masala dosa fifty rupees', 'My usual']],
   ['Bill & payment', ['What’s outstanding?', 'Show the bill', 'Pay the bill', 'Pay half', 'Ravi paid 300', 'Settle using advance', 'How much advance do we have?']],
   ['My tab & fixes', ['How much do I owe?', 'What did Ravi have?', 'Remove my vada', 'Undo that', 'Make my coffee two']],
+  ['Accounts', ['Show accounts', 'How much does Ravi owe?', 'Ravi gave 500', 'Collected 300 from Kiran by UPI']],
   ['Look things up', ['Report for this month', 'How much did we spend last week?', 'Open history', 'Show yesterday’s bill']],
   ['Admin', ['Change tea rate to 12', 'Add samosa to the menu at 15', 'Remove samosa from the menu', 'Reopen the round']],
 ];
 function aiHelp(heard, title = 'Things you can say') {
   const html = AI_EXAMPLES.filter(([g]) => g !== 'Admin' || currentUser.isAdmin).map(([g, egs]) =>
-    `<div class="ans-group">${g}</div>` + egs.map(e => `<button class="ans-eg" onclick="closeModal('aiAnswerModal');aiSource='text';aiParseText(this.textContent)">${esc(e)}</button>`).join('')).join('');
+    `<div class="ans-group">${g}</div>` + egs.filter(e => currentUser.isAdmin || !AI_ADMIN_EG.has(e)).map(e => `<button class="ans-eg" onclick="closeModal('aiAnswerModal');aiSource='text';aiParseText(this.textContent)">${esc(e)}</button>`).join('')).join('');
   aiAnswer(title, html, [{ label:'Try again', cls:'btn-primary', run: aiRetry }], heard);
 }
 
@@ -1400,6 +1489,13 @@ async function aiRunCommand(d) {
         if (a.to)   document.getElementById('reportTo').value   = a.to;
         return showPage('report');
       case 'advance':          return showAdvanceLedger();
+      case 'collect':
+        if (!aiNeedAdmin('record money received')) return;
+        return openCollect({ member_id:a.member_id, amount:a.amount, mode:a.mode, kind:a.kind });
+      case 'accounts':
+        if (a.month) document.getElementById('accMonth').value = a.month;
+        showPage('accounts');
+        return a.member_id ? openStatement(a.member_id) : null;
       case 'set_rate':         return aiSetMenuRate(a);
       case 'add_menu_item':    return aiAddMenuItem(a);
       case 'remove_menu_item': return aiRemoveMenuItem(a);
@@ -1457,7 +1553,7 @@ async function aiOpenPay(sessionId, a) {
   a = a || {};
   await openBillModal(sessionId);
   const amt = document.getElementById('payAmountInput');
-  if (a.payer_name) document.getElementById('payerNameInput').value = a.payer_name;
+  if (a.payer_member_id) setPayer('m:'+a.payer_member_id); else if (a.payer_name) setPayer('other', a.payer_name);
   if (a.amount) amt.value = a.amount; else if (a.fraction === 'half') fillPayAmount('half'); else if (a.fraction === 'full') fillPayAmount('full');
   if (a.use_advance) return toast(advanceAvailable > 0 && pendingBillAmount > 0 ? `Tap “Use Advance” to apply ${inr(Math.min(advanceAvailable, pendingBillAmount))}` : 'No advance credit to use right now');
   if (a.amount || a.fraction || a.payer_name || Object.keys(a).length) toast(pendingBillAmount > 0 ? `Check ${inr(amt.value)} and tap Confirm Payment` : 'This round is already paid');
@@ -1545,6 +1641,263 @@ async function aiReopen(a, heard) {
   if (!last) return aiAnswer('No round that day', `<p class="text-muted">There’s nothing to reopen.</p>`, [], heard);
   if (last.status === 'open') return toast(`Round ${last.round_no} is already open`);
   reopenSession(last.id);
+}
+
+
+// ════════════════════════════════════════════════════════
+// ITEM PHOTOS
+// ════════════════════════════════════════════════════════
+const itemImgUrl = it => `/api/items/${it.id}/image?v=${it.image_ver||0}`;
+function itemPic(it) {
+  return it.has_image ? `<img class="item-pic" src="${itemImgUrl(it)}" alt="" loading="lazy">`
+                      : `<div class="item-pic ph">${esc((it.name||'?').trim().charAt(0).toUpperCase())}</div>`;
+}
+function rowThumb(itemId) { const it = allItems.find(i => i.id === itemId); return it && it.has_image ? `<img class="row-thumb" src="${itemImgUrl(it)}" alt="" loading="lazy">` : ''; }
+let photoItemId = null;
+function openPhoto(id) {
+  const it = allItems.find(i => i.id === id); if (!it) return;
+  photoItemId = id;
+  document.getElementById('photoTitle').textContent = it.name;
+  document.getElementById('photoPreview').innerHTML = it.has_image ? `<img src="${itemImgUrl(it)}" alt="">` : 'No photo yet';
+  document.getElementById('photoRemoveBtn').style.display = it.has_image ? '' : 'none';
+  openModal('photoModal');
+}
+// Shrink on the phone first (centre-cropped 4:3, 480×360 JPEG ≈ 25 KB) so uploads are instant and the DB stays small
+function shrinkImage(file, W = 480, H = 360) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const s = Math.max(W / img.width, H / img.height), w = img.width * s, h = img.height * s;
+      const g = c.getContext('2d'); g.fillStyle = '#15110E'; g.fillRect(0, 0, W, H);
+      g.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => b ? resolve(b) : reject(new Error('Could not read that image')), 'image/jpeg', 0.82);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image')); };
+    img.src = url;
+  });
+}
+async function photoPicked(input) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file || !photoItemId) return;
+  const prev = document.getElementById('photoPreview'); prev.innerHTML = '<div class="spinner"></div>';
+  try {
+    const blob = await shrinkImage(file);
+    const r = await fetch(`/api/items/${photoItemId}/image`, { method:'PUT', headers:{ 'Content-Type':'image/jpeg' }, body: blob });
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Upload failed');
+    allItems = await api('GET','/api/items'); toast('📷 Photo saved');
+    openPhoto(photoItemId); loadAdminItems();
+  } catch (e) { toast('Error: ' + e.message); openPhoto(photoItemId); }
+}
+async function photoRemove() {
+  try { await api('DELETE', `/api/items/${photoItemId}/image`); allItems = await api('GET','/api/items'); toast('Photo removed'); closeModal('photoModal'); loadAdminItems(); }
+  catch (e) { toast('Error: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════
+// BILL SHEET — where the money came from
+// ════════════════════════════════════════════════════════
+let kittyInHand = 0;
+async function fillPayerSelect() {
+  const sel = document.getElementById('payerSelect');
+  if (!aiMembers.length) { try { aiMembers = await api('GET','/api/members/names'); } catch(e){} }
+  try { kittyInHand = (await api('GET','/api/accounts/kitty')).inHand; } catch(e) { kittyInHand = 0; }
+  sel.innerHTML = `<option value="kitty">💼 Kitty (${inr(kittyInHand)} in hand)</option>`
+    + aiMembers.map(m => `<option value="m:${m.id}">${esc(m.name)}${m.id===currentUser.memberId?' (me)':''} — own pocket</option>`).join('')
+    + `<option value="other">Someone else…</option>`;
+  setPayer(kittyInHand > 0 ? 'kitty' : 'm:' + currentUser.memberId);
+}
+function setPayer(val, otherName) {
+  const sel = document.getElementById('payerSelect');
+  if ([...sel.options].some(o => o.value === val)) sel.value = val;
+  if (otherName !== undefined) document.getElementById('payerNameInput').value = otherName;
+  payerChanged();
+}
+function payerChanged() {
+  const v = document.getElementById('payerSelect').value;
+  document.getElementById('payerNameInput').style.display = v === 'other' ? '' : 'none';
+  document.getElementById('payerHint').textContent =
+    v === 'kitty' ? `Comes out of the money collected from members — ${inr(kittyInHand)} in hand. Paying more than that takes the kitty negative.` :
+    v === 'other' ? 'Recorded for reference; not credited to any member’s account.' :
+    'Credited to this member’s account as money they put in.';
+}
+
+// ════════════════════════════════════════════════════════
+// ACCOUNTS
+// ════════════════════════════════════════════════════════
+let accData = null;
+const accMonthStr = () => document.getElementById('accMonth').value || todayStr().slice(0, 7);
+const monthLabel = m => new Date(m + '-01T12:00:00').toLocaleDateString('en-IN', { month:'long', year:'numeric' });
+function accShiftMonth(d) {
+  const [y, m] = accMonthStr().split('-').map(Number), n = new Date(y, m - 1 + d, 1);
+  document.getElementById('accMonth').value = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;
+  loadAccounts();
+}
+function balCls(n) { return n < -0.009 ? 'owes' : n > 0.009 ? 'credit' : 'settled'; }
+function balLbl(n) { return n < -0.009 ? 'to pay' : n > 0.009 ? 'in credit' : 'settled'; }
+
+async function loadAccounts() {
+  const el = document.getElementById('accMonth'); if (!el.value) el.value = todayStr().slice(0, 7);
+  document.getElementById('accCollectBtn').style.display = currentUser.isAdmin ? '' : 'none';
+  const cont = document.getElementById('accContent');
+  cont.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  try {
+    const a = accData = await api('GET', `/api/accounts?month=${accMonthStr()}`);
+    const t = a.totals, me = a.members.find(m => m.id === currentUser.memberId);
+    const rows = a.members.slice().sort((x, y) => x.closing - y.closing).map(m => `
+      <div class="acc-row" onclick="openStatement(${m.id})">
+        <div class="member-avatar">${initials(m.name)}</div>
+        <div><div class="acc-name">${esc(m.name)}${m.is_active?'':' <span class="badge badge-off">inactive</span>'}</div>
+          <div class="acc-sub">Had ${inr(m.consumed)} · put in ${inr(m.collected + m.paid_shop)}${m.opening ? ` · ${m.opening<0?'brought forward due':'brought forward credit'} ${inr(Math.abs(m.opening))}` : ''}</div></div>
+        <div class="acc-bal ${balCls(m.closing)}"><div class="n">${inr(Math.abs(m.closing))}</div><div class="l">${balLbl(m.closing)}</div></div>
+      </div>`).join('');
+    const colls = a.collections.map(c => `
+      <div class="pay-hist-row">
+        <span><div>${esc(c.member_name)} <span class="text-muted">· ${c.mode==='upi'?'UPI':c.mode==='other'?'Other':'Cash'}${c.note?' · '+esc(c.note):''}</span></div>
+          <div class="text-muted" style="font-size:.72rem;">${fmtDate(c.collected_on)}${c.collected_by_name?' · received by '+esc(c.collected_by_name):''}</div></span>
+        <span class="flex gap-8" style="align-items:center;"><span class="bold" style="color:${c.amount>0?'var(--jade)':'var(--rose)'};">${c.amount>0?'+':'−'}${inr(Math.abs(c.amount))}</span>
+          ${currentUser.isAdmin?`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;" onclick="deleteCollection(${c.id})">✕</button>`:''}</span>
+      </div>`).join('');
+
+    cont.innerHTML = `
+      ${me ? `<div class="pay-banner ${me.closing < -0.009 ? 'partial' : 'paid'}" style="cursor:pointer;" onclick="openStatement(${me.id})">
+        <h2>${me.closing < -0.009 ? 'You owe the group' : me.closing > 0.009 ? 'You’re in credit' : 'You’re all settled'}</h2>
+        <div class="pay-banner-total">${inr(Math.abs(me.closing))}</div>
+        <div style="font-size:.82rem;color:var(--muted);">${monthLabel(a.month)} · had ${inr(me.consumed)} · put in ${inr(me.collected + me.paid_shop)} · tap for your statement</div></div>` : ''}
+      <div class="stats-grid">
+        <div class="stat-card sc1"><div class="stat-num">${inr(t.consumed)}</div><div class="stat-lbl">Consumed in ${monthLabel(a.month).split(' ')[0]}</div></div>
+        <div class="stat-card sc1"><div class="stat-num">${inr(t.collected)}</div><div class="stat-lbl">Collected from members</div></div>
+        <div class="stat-card sc1"><div class="stat-num">${inr(a.shop.paidFromKitty + a.shop.paidByMembers + a.shop.paidByOthers)}</div><div class="stat-lbl">Paid to the shop</div></div>
+        <div class="stat-card sc2"><div class="stat-num">${inr(a.kitty.inHand)}</div><div class="stat-lbl">Kitty in hand now</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Members</span><span class="text-muted" style="font-family:var(--sans);">balance at end of ${monthLabel(a.month).split(' ')[0]}</span></div>
+        ${rows || '<div class="empty-state"><p>No activity yet</p></div>'}
+        <div class="divider"></div>
+        <div class="kv"><span>Still to collect from members</span><b style="color:var(--rose);">${inr(t.owed)}</b></div>
+        <div class="kv"><span>Members in credit</span><b style="color:var(--jade);">${inr(t.credit)}</b></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Where the money stands</div>
+        <div class="kv"><span>Paid to shop from kitty (this month)</span><b>${inr(a.shop.paidFromKitty)}</b></div>
+        <div class="kv"><span>Paid to shop by members directly</span><b>${inr(a.shop.paidByMembers)}</b></div>
+        ${a.shop.paidByOthers ? `<div class="kv"><span>Paid by others (not credited to a member)</span><b>${inr(a.shop.paidByOthers)}</b></div>` : ''}
+        <div class="divider"></div>
+        <div class="kv"><span>Unpaid at the shop right now</span><b style="color:${a.shop.outstanding>0?'var(--amber)':'var(--jade)'};">${inr(a.shop.outstanding)}</b></div>
+        <div class="kv"><span>Advance lying with the shop</span><b>${inr(a.shop.advance)}</b></div>
+        <div class="kv"><span>Kitty: collected ${inr(a.kitty.collected)} − spent ${inr(a.kitty.spent)}</span><b style="color:var(--gold-hi);">${inr(a.kitty.inHand)}</b></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Money received in ${monthLabel(a.month).split(' ')[0]}</div>
+        ${colls || '<p class="text-muted">Nothing recorded this month.</p>'}
+      </div>
+      <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:8px;">
+        <button class="btn btn-primary" onclick="shareAccounts()">📤 Share month summary</button>
+        <button class="btn btn-ghost" onclick="downloadAccountsCsv()">⬇️ CSV</button>
+        <button class="btn btn-ghost" onclick="window.print()">🖨️ Print / PDF</button>
+      </div>`;
+  } catch (e) { cont.innerHTML = `<div class="empty-state"><p>${esc(e.message)}</p></div>`; }
+}
+
+// ── receive / refund ──
+let collectState = { kind:'receive' };
+function collectKind(k) {
+  collectState.kind = k;
+  document.querySelectorAll('#collectKind button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  document.getElementById('collectTitle').textContent = k === 'refund' ? 'Refund to member' : 'Receive money';
+}
+async function openCollect(pre = {}) {
+  if (!currentUser.isAdmin) return toast('Only the admin can record money received');
+  if (!accData) { try { accData = await api('GET', `/api/accounts?month=${todayStr().slice(0,7)}`); } catch (e) {} }
+  const list = (accData ? accData.members : aiMembers);
+  document.getElementById('collectMember').innerHTML = '<option value="">Choose member…</option>' + list.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  document.getElementById('collectMember').value = pre.member_id || '';
+  document.getElementById('collectAmount').value = pre.amount || '';
+  document.getElementById('collectMode').value = pre.mode || 'cash';
+  document.getElementById('collectDate').value = todayStr();
+  document.getElementById('collectNote').value = '';
+  collectKind(pre.kind === 'refund' ? 'refund' : 'receive');
+  collectMemberChanged(!pre.amount);
+  openModal('collectModal');
+}
+function collectMemberChanged(prefill = true) {
+  const id = +document.getElementById('collectMember').value, m = accData && accData.members.find(x => x.id === id), el = document.getElementById('collectDue');
+  if (!m) { el.textContent = ''; return; }
+  el.innerHTML = m.closing < -0.009 ? `Owes <b style="color:var(--rose);">${inr(-m.closing)}</b> as of ${monthLabel(accData.month)}` : m.closing > 0.009 ? `In credit by <b style="color:var(--jade);">${inr(m.closing)}</b>` : 'All settled';
+  if (prefill && collectState.kind === 'receive' && m.closing < -0.009) document.getElementById('collectAmount').value = Math.ceil(-m.closing);
+}
+async function saveCollect() {
+  const body = { member_id:+document.getElementById('collectMember').value, amount:parseFloat(document.getElementById('collectAmount').value),
+    mode:document.getElementById('collectMode').value, note:document.getElementById('collectNote').value.trim(),
+    collected_on:document.getElementById('collectDate').value, kind:collectState.kind };
+  if (!body.member_id) return toast('Choose a member');
+  if (!(body.amount > 0)) return toast('Enter the amount');
+  const btn = document.getElementById('collectSaveBtn'); btn.disabled = true;
+  try {
+    await api('POST', '/api/accounts/collections', body);
+    closeModal('collectModal'); closeModal('aiAnswerModal');
+    toast(body.kind === 'refund' ? `Refund of ${inr(body.amount)} recorded` : `${inr(body.amount)} received`);
+    accData = null;
+    if (document.getElementById('page-accounts').classList.contains('active')) loadAccounts();
+  } catch (e) { toast('Error: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+function deleteCollection(id) {
+  confirm('Delete this entry?', 'The member’s balance will change back.', async () => {
+    try { await api('DELETE', `/api/accounts/collections/${id}`); toast('Deleted'); loadAccounts(); } catch (e) { toast('Error: ' + e.message); }
+  }, 'Delete', 'btn-danger');
+}
+
+// ── one member's statement ──
+let stmtData = null;
+async function openStatement(memberId) {
+  try {
+    const s = stmtData = await api('GET', `/api/accounts/member/${memberId}?month=${accMonthStr()}`);
+    const lines = s.lines.map(l => `<div class="stmt-line">
+        <span class="d">${new Date(l.date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>
+        <span>${l.kind==='consumed'?'':(l.kind==='refund'?'↩︎ Refund · ':l.kind==='collected'?'💵 Received · ':'🏪 ')}${esc(l.label)}</span>
+        <span class="a" style="color:${l.amount<0?'var(--ceramic)':'var(--jade)'};">${l.amount<0?'−':'+'}${inr(Math.abs(l.amount))}<span class="b">bal ${s_bal(l.balance)}</span></span></div>`).join('');
+    const actions = [{ label:'📤 Share', cls:'btn-primary', run: shareStatement }];
+    if (currentUser.isAdmin && s.closing < -0.009) actions.unshift({ label:`Receive ${inr(Math.ceil(-s.closing))}`, cls:'btn-ghost', run: () => openCollect({ member_id:s.member.id, amount:Math.ceil(-s.closing) }) });
+    aiAnswer(`${s.member.name} — ${monthLabel(s.month)}`,
+      `<div class="acc-bal ${balCls(s.closing)}" style="text-align:left;margin-bottom:10px;"><div class="n" style="font-size:2.4rem;">${inr(Math.abs(s.closing))}</div><div class="l" style="font-size:.8rem;">${balLbl(s.closing)} at month end</div></div>
+       <div class="kv"><span>Brought forward</span><b>${s_bal(s.opening)}</b></div>
+       ${lines || '<p class="text-muted" style="padding:10px 0;">No activity this month.</p>'}`, actions);
+  } catch (e) { toast('Error: ' + e.message); }
+}
+const s_bal = n => (n < -0.009 ? '−' : n > 0.009 ? '+' : '') + inr(Math.abs(n));
+
+// ── sharing ──
+function shareText(title, text) {
+  if (navigator.share) return navigator.share({ title, text }).catch(() => {});
+  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+}
+function shareStatement() {
+  const s = stmtData; if (!s) return;
+  const L = [`☕ Morning Accounts — ${s.member.name}`, monthLabel(s.month), '', `Brought forward: ${s_bal(s.opening)}`];
+  s.lines.forEach(l => L.push(`${new Date(l.date+'T12:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'})}  ${l.kind==='consumed'?l.label:(l.kind==='collected'?'Received ('+l.label+')':l.kind==='refund'?'Refund ('+l.label+')':l.label)}  ${l.amount<0?'-':'+'}₹${Math.abs(l.amount)}`));
+  L.push('', s.closing < -0.009 ? `👉 To pay: ${inr(-s.closing)}` : s.closing > 0.009 ? `✅ In credit: ${inr(s.closing)}` : '✅ All settled');
+  shareText('Coffee statement', L.join('\n'));
+}
+function shareAccounts() {
+  const a = accData; if (!a) return;
+  const L = [`☕ Morning Accounts — ${monthLabel(a.month)}`, '', `Consumed: ${inr(a.totals.consumed)}`, `Collected: ${inr(a.totals.collected)}`,
+    `Paid to shop: ${inr(a.shop.paidFromKitty + a.shop.paidByMembers + a.shop.paidByOthers)}`, `Kitty in hand: ${inr(a.kitty.inHand)}`, `Unpaid at shop: ${inr(a.shop.outstanding)}`, '', 'Balances:'];
+  a.members.slice().sort((x, y) => x.closing - y.closing).forEach(m => L.push(`• ${m.name}: ${m.closing < -0.009 ? 'to pay ' + inr(-m.closing) : m.closing > 0.009 ? 'credit ' + inr(m.closing) : 'settled'}  (had ${inr(m.consumed)}, put in ${inr(m.collected + m.paid_shop)})`));
+  shareText('Coffee accounts', L.join('\n'));
+}
+function downloadAccountsCsv() {
+  const a = accData; if (!a) return;
+  const q = v => `"${String(v).replace(/"/g,'""')}"`;
+  const rows = [['Member','Brought forward','Consumed','Given to kitty','Paid shop directly','Closing balance (− = to pay)'],
+    ...a.members.map(m => [m.name, m.opening, m.consumed, m.collected, m.paid_shop, m.closing]),
+    ['TOTAL', a.totals.opening, a.totals.consumed, a.totals.collected, a.totals.paid_shop, a.totals.closing], [],
+    ['Kitty in hand', a.kitty.inHand], ['Unpaid at shop', a.shop.outstanding], ['Advance with shop', a.shop.advance], [],
+    ['Date','Member','Amount','Mode','Note'], ...a.collections.map(c => [c.collected_on, c.member_name, c.amount, c.mode, c.note || ''])];
+  const blob = new Blob(['\ufeff' + rows.map(r => r.map(q).join(',')).join('\n')], { type:'text/csv' });
+  const l = document.createElement('a'); l.href = URL.createObjectURL(blob); l.download = `coffee-accounts-${a.month}.csv`; l.click();
+  setTimeout(() => URL.revokeObjectURL(l.href), 2000);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1739,7 +2092,7 @@ async function loadLiveBoard() {
       .map(([name,data])=>{
         const grouped = {};
         data.entries.forEach(e=>{
-          const g = grouped[e.item_name] || (grouped[e.item_name]={qty:0,amount:0,ids:[]});
+          const g = grouped[e.item_name] || (grouped[e.item_name]={qty:0,amount:0,ids:[],item_id:e.item_id});
           g.qty+=e.qty; g.amount+=parseFloat(e.amount);
           if (isOpen && canTouch(e)) { g.ids.push(e.id); boardEntries[e.id] = e; }
         });
@@ -1753,7 +2106,7 @@ async function loadLiveBoard() {
           </div>
           ${Object.entries(grouped).map(([iname,iv])=>`
             <div class="item-summary-row" style="align-items:center;">
-              <span>${esc(iname)} <span style="color:var(--mocha);">×${iv.qty}</span></span>
+              <span>${rowThumb(iv.item_id)}${esc(iname)} <span style="color:var(--mocha);">×${iv.qty}</span></span>
               <span style="white-space:nowrap;"><span class="bold">₹${iv.amount.toLocaleString('en-IN')}</span>${iv.ids.length?`<button class="edit-pen" title="Edit / delete" onclick="openEntryEditor([${iv.ids.join(',')}])">✏️</button>`:''}</span>
             </div>`).join('')}
         </div>`;
@@ -1773,7 +2126,7 @@ async function openBillModal(sessionId) {
   openModal('billModal');
   document.getElementById('billModalBody').innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
   document.getElementById('payAmountInput').value = '';
-  document.getElementById('payerNameInput').value = currentUser.name || '';
+  fillPayerSelect();
 
   try {
     const { session, byMember, itemSummary, grandTotal, payments, amountPaid, pending, advanceBalance } = await api('GET',`/api/tab/all?session_id=${sessionId}`);
@@ -1903,9 +2256,12 @@ async function payNow() {
   const raw = document.getElementById('payAmountInput').value;
   const amount = raw === '' ? undefined : parseFloat(raw);
   if (amount !== undefined && (isNaN(amount) || amount <= 0)) { toast('Enter a valid amount'); return; }
-  const payerName = document.getElementById('payerNameInput').value.trim();
+  const src = document.getElementById('payerSelect').value, body = { session_id:pendingPaySessionId, amount };
+  if (src === 'kitty') body.from_kitty = true;
+  else if (src.startsWith('m:')) body.payer_member_id = parseInt(src.slice(2), 10);
+  else { body.payer_name = document.getElementById('payerNameInput').value.trim(); if (!body.payer_name) { toast('Enter who paid'); return; } }
   try {
-    const res = await api('POST','/api/tab/pay',{session_id:pendingPaySessionId, amount, payer_name: payerName});
+    const res = await api('POST','/api/tab/pay', body);
     closeModal('billModal');
     if (res.excess > 0) toast(`💰 Paid in full + ₹${res.excess.toLocaleString('en-IN')} added as advance credit`);
     else if (res.pending > 0) toast(`💰 ₹${res.amountPaid.toLocaleString('en-IN')} paid · ₹${res.pending.toLocaleString('en-IN')} still pending`);
@@ -2008,7 +2364,8 @@ async function loadAdminItems() {
   list.innerHTML = allItems.map(it=>`
     ${it.created_by_name?`<div style="margin:6px 0 -4px;"><span class="by-chip" style="margin-left:0;">🆕 added by ${esc(it.created_by_name)}</span></div>`:''}
     <div class="rate-row">
-      <input class="form-input" style="flex:2;margin-right:8px;padding:6px 10px;" id="iname-${it.id}" value="${esc(it.name)}">
+      <button class="item-thumb" onclick="openPhoto(${it.id})" title="Item photo">${it.has_image?`<img src="${itemImgUrl(it)}" alt="">`:'📷'}</button>
+      <input class="form-input" style="flex:2;margin-right:8px;padding:6px 10px;min-width:0;" id="iname-${it.id}" value="${esc(it.name)}">
       <span style="color:var(--mocha);font-size:.83rem;margin-right:4px;">₹</span>
       <input type="number" class="rate-input" style="margin-right:8px;" id="irate-${it.id}" value="${parseFloat(it.rate).toFixed(0)}" min="0">
       <button class="btn btn-ghost btn-sm" onclick="saveItem(${it.id})">💾</button>

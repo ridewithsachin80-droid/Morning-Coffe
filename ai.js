@@ -84,14 +84,19 @@ INTENTS and their args (use null for anything not said):
                      scope "outstanding" when they say outstanding / pending / due / unpaid / baaki / "how much do we owe"; else "round".
 - "pay"              pay / settle / clear the bill, or record that someone paid ("Ravi paid 300", "I gave 200 to the shop", "pay half", "settle using advance").
                      args {"amount":<number|null>,"fraction":"full"|"half"|null,"payer_member_id":<id|null>,"payer_name":<string|null>,"use_advance":<bool>,"date":null}
-- "my_tab"           what did I have / my tab / how much is mine. args {"date":null}
+- "my_tab"           what did I have today / my tab for this round. args {"date":null}  ("how much do I owe" overall is intent "accounts" with the speaker's member_id)
 - "member_tab"       what did <member> have / <member>'s total. args {"member_id":<id>,"date":null}
 - "remove_entry"     undo / cancel / remove / delete something already added to the tab ("remove my vada", "undo that", "cancel last one", "delete Ravi's tea").
                      args {"item_id":<id|null>,"member_id":<id|null>,"which":"last"|"all"|null}
 - "change_qty"       correct a quantity already on the tab ("make my coffee two", "change vada to 3"). args {"item_id":<id>,"qty":<int>,"member_id":<id|null>}
-- "navigate"         open a screen. args {"page":"liveBoard"|"addItems"|"myTab"|"history"|"report"|"members"|"adminItems"}
+- "navigate"         open a screen. args {"page":"liveBoard"|"addItems"|"myTab"|"history"|"report"|"accounts"|"members"|"adminItems"}
 - "report"           spending report / how much did we spend over a period. args {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} ("this month", "last week", "September" → real dates)
 - "advance"          advance / credit balance with the shop. args {}
+- "collect"          money RECEIVED FROM a member into the group kitty ("Ravi gave 500", "collected 300 from Kiran by UPI", "received 200 from Ravi", "refund 100 to Ravi").
+                     args {"member_id":<id>,"amount":<number>,"mode":"cash"|"upi"|null,"kind":"receive"|"refund"}
+                     NOTE: "<member> paid the shop / paid the bill" is intent "pay"; "<member> gave / gave me / deposited / contributed" is "collect".
+- "accounts"         accounts, balances, who owes, monthly statement ("show accounts", "how much does Ravi owe", "August accounts", "my balance").
+                     args {"month":"YYYY-MM"|null,"member_id":<id|null>}  (member_id = the speaker for "my balance")
 - "set_rate"         change a MENU price ("make tea 12 rupees", "coffee rate 25"). args {"item_id":<id>,"rate":<number>}
 - "add_menu_item"    add something to the MENU without ordering it ("add samosa to the menu at 15"). args {"name":"<Title Case>","rate":<number|null>}
 - "remove_menu_item" take something off the MENU. args {"item_id":<id>}
@@ -357,8 +362,8 @@ function validate(raw, ctx) {
 
 // ── commands (everything that is not an order) ──────────────────
 const INTENTS = new Set(['order','show_bill','pay','my_tab','member_tab','remove_entry','change_qty','navigate','report',
-  'advance','set_rate','add_menu_item','remove_menu_item','reopen_round','help','logout','unknown']);
-const PAGES = new Set(['liveBoard','addItems','myTab','history','report','members','adminItems']);
+  'advance','collect','accounts','set_rate','add_menu_item','remove_menu_item','reopen_round','help','logout','unknown']);
+const PAGES = new Set(['liveBoard','addItems','myTab','history','report','accounts','members','adminItems']);
 const isDate = d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d));
 
 function validateCommand(raw, ctx) {
@@ -384,6 +389,8 @@ function validateCommand(raw, ctx) {
                           if (!args.item_id || !args.qty) intent = 'unknown'; } break;
     case 'navigate':    args = { page: PAGES.has(a.page) ? a.page : null }; if (!args.page) intent = 'unknown'; break;
     case 'report':      args = { from: date(a.from), to: date(a.to) }; if (args.from && args.to && args.from > args.to) [args.from, args.to] = [args.to, args.from]; break;
+    case 'collect':     args = { member_id: mem(a.member_id), amount: num(a.amount, 1e6), mode: ['cash','upi'].includes(a.mode) ? a.mode : null, kind: a.kind === 'refund' ? 'refund' : 'receive' }; break;
+    case 'accounts':    args = { month: /^\d{4}-\d{2}$/.test(a.month || '') ? a.month : null, member_id: mem(a.member_id) }; break;
     case 'set_rate':    args = { item_id: item(a.item_id), rate: num(a.rate, 5000) }; if (!args.item_id || !args.rate) intent = 'unknown'; break;
     case 'add_menu_item': args = { name: tidyName(a.name), rate: num(a.rate, 5000) }; if (args.name.length < 2) intent = 'unknown'; break;
     case 'remove_menu_item': args = { item_id: item(a.item_id) }; if (!args.item_id) intent = 'unknown'; break;
@@ -410,13 +417,17 @@ function ruleIntent(text, ctx) {
   if (has(/ (advance|credit) /) && !has(/ (pay|settle|use|using|apply) /)) return { intent: 'advance', args: {} };
   if (has(/ menu /) && has(/ (remove|delete|take off) /)) { const i = itemIn(); if (i) return { intent: 'remove_menu_item', args: { item_id: i.id } }; }
   if (has(/ (rate|price) /) && has(/ (change|make|set|update|to) /)) { const i = itemIn(), r = amt(); if (i && r) return { intent: 'set_rate', args: { item_id: i.id, rate: r } }; }
+  if (has(/ (gave|given|collected?|received?|deposit(ed)?|contribut(ed|ion)|refund(ed)?) /)) {
+    const m = member(); return { intent: 'collect', args: { member_id: m ? m.id : null, amount: amt(), mode: has(/ (upi|gpay|phonepe|paytm|online) /) ? 'upi' : has(/ cash /) ? 'cash' : null, kind: has(/ refund/) ? 'refund' : 'receive' } };
+  }
+  if (has(/ (accounts?|balances?|statement|who owes|owes?) /)) { const m = member(); return { intent: 'accounts', args: { month: null, member_id: m ? m.id : (has(/ (my|i|mine) /) ? ctx.speaker.id : null) } }; }
   if (has(/ (paid|pay|settle|clear|payment) /)) {
     const m = member();
     return { intent: 'pay', args: { amount: amt(), fraction: has(/ half /) ? 'half' : has(/ (full|fully|everything|all) /) ? 'full' : null,
       payer_member_id: m ? m.id : null, payer_name: m ? m.name : null, use_advance: has(/ (advance|credit) /), date: day } };
   }
   if (has(/ (outstanding|pending|due|dues|unpaid|baaki|baki|owe) /) && !has(/ (i|my|mine) /)) return { intent: 'show_bill', args: { scope: 'outstanding', date: null } };
-  if (has(/ (my tab|my total|my bill|mine|do i owe|did i (have|take|order)) /)) return { intent: 'my_tab', args: { date: day } };
+  if (has(/ (my tab|my total|my bill|mine|did i (have|take|order)) /)) return { intent: 'my_tab', args: { date: day } };
   if (has(/ (bill|total|tab) /)) { const m = member(); return m && has(/ (s|his|her|have|had|total|tab) /) && !has(/ (the bill|show bill|see bill) /) ? { intent: 'member_tab', args: { member_id: m.id, date: day } } : { intent: 'show_bill', args: { scope: 'round', date: day } }; }
   if (has(/ what (did|has|have) /)) { const m = member(); return m ? { intent: 'member_tab', args: { member_id: m.id, date: day } } : { intent: 'my_tab', args: { date: day } }; }
   if (has(/ (undo|remove|delete|cancel|scratch) /)) { const i = itemIn(), m = member(); return { intent: 'remove_entry', args: { item_id: i ? i.id : null, member_id: m ? m.id : null, which: has(/ all /) ? 'all' : 'last' } }; }

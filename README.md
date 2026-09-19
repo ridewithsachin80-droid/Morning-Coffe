@@ -129,6 +129,27 @@ Fallback chain: Groq → Gemini → built-in rules. AI output is never written d
 Any member can *add* a missing item this way (`POST /api/items/quick`, max 15/day, records `created_by`);
 editing rates and removing items stays admin-only under **Items**. Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
 
+### 📷 Item photos
+Admin → **Items** → tap the 📷 square beside an item → choose or take a photo. The phone crops and shrinks it
+(480×360 JPEG, ~25 KB) before upload; it is stored in Postgres (`items.image`) — no bucket to configure — and
+served with a versioned, cache-forever URL. Photos show on the Add Items cards and beside lines on the Live Board.
+
+### 💼 Accounts — collect from members, close the month
+**Accounts** tab (everyone can read; only admin records money).
+
+- **Member balance = money they put in − what they consumed.** "Put in" = cash/UPI you received from them
+  (**＋ Receive money**) + anything they paid the shop from their own pocket. Negative = to pay, positive = credit.
+  Balances carry forward month to month ("brought forward").
+- **Kitty in hand = everything collected − payments to the shop made from the kitty.**
+- When paying the shop, **Paid from** now asks the source: 💼 *Kitty* (collected money), a *member's own pocket*
+  (credited to their account), or *someone else* (recorded, credited to nobody). Older payments are matched to
+  members by payer name automatically.
+- Tap a member → day-by-day **statement** with running balance → **Share** (WhatsApp) or **Receive ₹due** in one tap.
+- Month end: pick the month → **Share month summary**, **CSV**, or **Print / PDF**.
+- Voice: "Ravi gave 500", "collected 300 from Kiran by UPI", "refund 100 to Ravi", "show accounts",
+  "how much does Ravi owe?", "August accounts".
+- Sanity check built in: *still to collect from members* = *unpaid at the shop* − *kitty in hand* (when no one is in credit).
+
 ### 🗣️ Voice commands (not just orders)
 The mic is on every screen and understands commands as well as orders — say it or type it:
 

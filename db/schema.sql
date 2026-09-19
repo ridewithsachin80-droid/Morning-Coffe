@@ -112,6 +112,40 @@ ALTER TABLE tab_entries ADD COLUMN IF NOT EXISTS source   VARCHAR(10) DEFAULT 't
 -- Who added a menu item (members can add missing items while ordering by voice)
 ALTER TABLE items ADD COLUMN IF NOT EXISTS created_by INT REFERENCES members(id);
 
+-- Item photos: small (≈320px) images resized on the phone before upload, stored inline
+ALTER TABLE items ADD COLUMN IF NOT EXISTS image      BYTEA;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS image_mime VARCHAR(40);
+ALTER TABLE items ADD COLUMN IF NOT EXISTS image_ver  INT NOT NULL DEFAULT 0;
+
+-- ── Accounts ──
+-- Money received from members into the group kitty (negative amount = refund to the member)
+CREATE TABLE IF NOT EXISTS member_collections (
+  id           SERIAL PRIMARY KEY,
+  member_id    INT NOT NULL REFERENCES members(id),
+  amount       NUMERIC(10,2) NOT NULL CHECK (amount <> 0),
+  mode         VARCHAR(20) DEFAULT 'cash',          -- cash | upi | other
+  note         VARCHAR(200),
+  collected_on DATE NOT NULL DEFAULT CURRENT_DATE,
+  collected_by INT REFERENCES members(id),
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_collections_member ON member_collections(member_id);
+CREATE INDEX IF NOT EXISTS idx_collections_date   ON member_collections(collected_on);
+
+-- Who really funded each payment to the shop: a member's own pocket (credited to them) or the kitty
+ALTER TABLE session_payments ADD COLUMN IF NOT EXISTS payer_member_id INT REFERENCES members(id);
+ALTER TABLE session_payments ADD COLUMN IF NOT EXISTS from_kitty      BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE advance_ledger   ADD COLUMN IF NOT EXISTS payer_member_id INT REFERENCES members(id);
+ALTER TABLE advance_ledger   ADD COLUMN IF NOT EXISTS from_kitty      BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Backfill older payments: match the free-text payer name to a member (safe to re-run)
+UPDATE session_payments sp SET payer_member_id = m.id
+FROM members m
+WHERE sp.payer_member_id IS NULL AND sp.from_kitty = FALSE AND LOWER(TRIM(sp.payer_name)) = LOWER(m.name);
+UPDATE advance_ledger al SET payer_member_id = m.id
+FROM members m
+WHERE al.payer_member_id IS NULL AND al.from_kitty = FALSE AND al.amount > 0 AND LOWER(TRIM(al.payer_name)) = LOWER(m.name);
+
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 

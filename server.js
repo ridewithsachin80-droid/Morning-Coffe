@@ -148,16 +148,19 @@ app.get('/api/me', auth, (req, res) =>
   res.json({ name: req.user.name, isAdmin: req.user.is_admin, memberId: req.user.member_id }));
 
 // ── ITEMS ──
+// Never SELECT * on items: the photo bytes live in the same row and must not ride along on every query
+const ITEM_COLS = 'id,name,rate,is_active,display_order,created_at,created_by,image_ver,(image IS NOT NULL) as has_image';
+const ITEM_COLS_I = ITEM_COLS.split(',').map(c => c.startsWith('(') ? '(i.image IS NOT NULL) as has_image' : 'i.' + c).join(',');
 app.get('/api/items', auth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT i.*, m.name as created_by_name FROM items i LEFT JOIN members m ON m.id = i.created_by
+    `SELECT ${ITEM_COLS_I}, m.name as created_by_name FROM items i LEFT JOIN members m ON m.id = i.created_by
      WHERE i.is_active=TRUE ORDER BY i.display_order, i.id`);
   res.json(rows);
 });
 app.post('/api/items', auth, adminOnly, async (req, res) => {
   try {
     const { name, rate } = req.body;
-    const { rows } = await pool.query('INSERT INTO items (name,rate) VALUES ($1,$2) RETURNING *', [name, rate]);
+    const { rows } = await pool.query(`INSERT INTO items (name,rate) VALUES ($1,$2) RETURNING ${ITEM_COLS}`, [name, rate]);
     res.json(rows[0]);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -171,10 +174,10 @@ app.post('/api/items/quick', auth, async (req, res) => {
     if (name.length < 2) return res.status(400).json({ error: 'Item name required' });
     if (!Number.isFinite(rate) || rate <= 0 || rate > 5000) return res.status(400).json({ error: `Enter a valid rate for ${name}` });
 
-    const { rows: ex } = await pool.query('SELECT * FROM items WHERE LOWER(name)=LOWER($1)', [name]);
+    const { rows: ex } = await pool.query(`SELECT ${ITEM_COLS} FROM items WHERE LOWER(name)=LOWER($1)`, [name]);
     if (ex.length) {
       if (ex[0].is_active) return res.json({ ...ex[0], existed: true });
-      const { rows } = await pool.query('UPDATE items SET is_active=TRUE, rate=$1 WHERE id=$2 RETURNING *', [rate, ex[0].id]);
+      const { rows } = await pool.query(`UPDATE items SET is_active=TRUE, rate=$1 WHERE id=$2 RETURNING ${ITEM_COLS}`, [rate, ex[0].id]);
       return res.json({ ...rows[0], reactivated: true });
     }
     const { rows: cnt } = await pool.query(
@@ -182,16 +185,45 @@ app.post('/api/items/quick', auth, async (req, res) => {
     if (!req.user.is_admin && cnt[0].n >= 15) return res.status(429).json({ error: 'Too many new items today — ask the admin to add it' });
     const { rows: mx } = await pool.query('SELECT COALESCE(MAX(display_order),0)+1 as o FROM items');
     const { rows } = await pool.query(
-      'INSERT INTO items (name,rate,display_order,created_by) VALUES ($1,$2,$3,$4) RETURNING *',
+      `INSERT INTO items (name,rate,display_order,created_by) VALUES ($1,$2,$3,$4) RETURNING ${ITEM_COLS}`,
       [name, rate, mx[0].o, req.user.member_id]);
     res.json(rows[0]);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Item photo. The phone resizes to ~320px JPEG first, so these are ~15–30 KB each.
+app.put('/api/items/:id/image', auth, adminOnly,
+  express.raw({ type: req => /^image\/(jpeg|png|webp)/i.test(req.headers['content-type'] || ''), limit: '600kb' }),
+  async (req, res) => {
+    try {
+      if (!Buffer.isBuffer(req.body) || req.body.length < 100) return res.status(400).json({ error: 'Send a JPEG, PNG or WebP image under 600 KB' });
+      const mime = (req.headers['content-type'] || 'image/jpeg').split(';')[0].toLowerCase();
+      const { rows } = await pool.query(
+        `UPDATE items SET image=$1, image_mime=$2, image_ver=image_ver+1 WHERE id=$3 RETURNING ${ITEM_COLS}`, [req.body, mime, req.params.id]);
+      if (!rows.length) return res.status(404).json({ error: 'Item not found' });
+      res.json(rows[0]);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+app.delete('/api/items/:id/image', auth, adminOnly, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE items SET image=NULL, image_mime=NULL, image_ver=image_ver+1 WHERE id=$1 RETURNING ${ITEM_COLS}`, [req.params.id]);
+    res.json(rows[0] || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// URL carries ?v=<image_ver>, so the browser may cache it forever; a new photo gets a new URL
+app.get('/api/items/:id/image', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT image, image_mime FROM items WHERE id=$1', [req.params.id]);
+    if (!rows.length || !rows[0].image) return res.status(404).end();
+    res.set({ 'Content-Type': rows[0].image_mime || 'image/jpeg', 'Cache-Control': 'private, max-age=31536000, immutable' }).send(rows[0].image);
+  } catch (e) { res.status(500).end(); }
+});
+
 app.put('/api/items/:id', auth, adminOnly, async (req, res) => {
   try {
     const { name, rate, is_active } = req.body;
     const { rows } = await pool.query(
-      'UPDATE items SET name=$1,rate=$2,is_active=$3 WHERE id=$4 RETURNING *',
+      `UPDATE items SET name=$1,rate=$2,is_active=$3 WHERE id=$4 RETURNING ${ITEM_COLS}`,
       [name, rate, is_active ?? true, req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Item not found' });
     // A corrected name/rate also fixes lines on rounds that are still OPEN (nothing paid yet).
@@ -366,7 +398,7 @@ app.post('/api/tab', auth, async (req, res) => {
     for (const e of entries) {
       const qty = parseInt(e.qty, 10);
       if (!Number.isFinite(qty) || qty <= 0 || qty > 50) continue;
-      const { rows: item } = await pool.query('SELECT * FROM items WHERE id=$1 AND is_active=TRUE', [e.item_id]);
+      const { rows: item } = await pool.query(`SELECT ${ITEM_COLS} FROM items WHERE id=$1 AND is_active=TRUE`, [e.item_id]);
       if (!item.length) continue;
       const forMember = e.member_id ? parseInt(e.member_id, 10) : req.user.member_id;
       if (!memberIds.has(forMember)) return res.status(400).json({ error: 'Unknown or inactive member in order' });
@@ -410,7 +442,7 @@ app.put('/api/tab/:id', auth, async (req, res) => {
     if (!Number.isFinite(qty) || qty < 1 || qty > 50) return res.status(400).json({ error: 'Quantity must be 1–50' });
 
     if (item_id !== undefined && Number(item_id) !== entry.item_id) {
-      const { rows: it } = await pool.query('SELECT * FROM items WHERE id=$1 AND is_active=TRUE', [item_id]);
+      const { rows: it } = await pool.query(`SELECT ${ITEM_COLS} FROM items WHERE id=$1 AND is_active=TRUE`, [item_id]);
       if (!it.length) return res.status(400).json({ error: 'Item not on the menu' });
       itemId = it[0].id; itemName = it[0].name; rate = it[0].rate;
     }
@@ -531,20 +563,30 @@ app.post('/api/tab/pay', auth, async (req, res) => {
       ? parseFloat(req.body.amount) : pending;
     if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Enter a valid amount' });
 
-    const payerName = (req.body.payer_name && req.body.payer_name.trim()) || req.user.name;
+    // Where did the money come from?  kitty → collected funds · member → their own pocket (credited to
+    // their account) · anything else → free-text payer (kept for the record, credited to nobody)
+    const fromKitty = req.body.from_kitty === true;
+    let payerMemberId = null, payerName = (req.body.payer_name && String(req.body.payer_name).trim()) || req.user.name;
+    if (fromKitty) payerName = 'Kitty';
+    else {
+      const { rows: pm } = req.body.payer_member_id
+        ? await pool.query('SELECT id,name FROM members WHERE id=$1', [req.body.payer_member_id])
+        : await pool.query('SELECT id,name FROM members WHERE LOWER(name)=LOWER($1)', [payerName]);
+      if (pm.length) { payerMemberId = pm[0].id; payerName = pm[0].name; }
+    }
     const note = req.body.note || null;
     const applyToRound = Math.round(Math.min(amount, pending) * 100) / 100;
     const excess = Math.round((amount - applyToRound) * 100) / 100;
 
     if (applyToRound > 0) {
       await pool.query(
-        `INSERT INTO session_payments (session_id, amount, paid_by, payer_name, note) VALUES ($1,$2,$3,$4,$5)`,
-        [sess.id, applyToRound, req.user.member_id, payerName, note]);
+        `INSERT INTO session_payments (session_id, amount, paid_by, payer_name, note, payer_member_id, from_kitty) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [sess.id, applyToRound, req.user.member_id, payerName, note, payerMemberId, fromKitty]);
     }
     if (excess > 0) {
       await pool.query(
-        `INSERT INTO advance_ledger (amount, session_id, payer_name, note) VALUES ($1,$2,$3,$4)`,
-        [excess, sess.id, payerName, note || `Overpayment on ${dateStr(sess.date)} Round ${sess.round_no}`]);
+        `INSERT INTO advance_ledger (amount, session_id, payer_name, note, payer_member_id, from_kitty) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [excess, sess.id, payerName, note || `Overpayment on ${dateStr(sess.date)} Round ${sess.round_no}`, payerMemberId, fromKitty]);
     }
 
     const money = await getSessionMoney(sess.id);
@@ -732,6 +774,170 @@ app.get('/api/reports', auth, async (req, res) => {
       advanceBalance
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ════════════════════════════════════════════════════════
+// ACCOUNTS — who consumed what, who put in what, who owes what
+//
+//   member balance = money they put in  −  what they consumed
+//   money they put in = collections received from them (kitty)  +  anything they paid the shop from their own pocket
+//   kitty in hand     = all collections  −  payments to the shop made from the kitty
+//
+// Positive balance = credit with the group · negative = they owe.
+// ════════════════════════════════════════════════════════
+const TZ = process.env.APP_TZ || 'Asia/Kolkata';
+const r2 = n => Math.round(parseFloat(n || 0) * 100) / 100;
+
+function monthRange(month) {
+  const m = /^(\d{4})-(\d{2})$/.exec(month || '');
+  const now = new Date();
+  const y = m ? +m[1] : now.getFullYear(), mo = m ? +m[2] - 1 : now.getMonth();
+  const pad = n => String(n).padStart(2, '0');
+  const last = new Date(y, mo + 1, 0).getDate();
+  return { month: `${y}-${pad(mo + 1)}`, from: `${y}-${pad(mo + 1)}-01`, to: `${y}-${pad(mo + 1)}-${pad(last)}` };
+}
+
+app.get('/api/accounts', auth, async (req, res) => {
+  try {
+    const { month, from, to } = monthRange(req.query.month);
+    const { rows } = await pool.query(
+      `WITH c AS (   -- consumed
+         SELECT te.member_id,
+                SUM(te.amount) FILTER (WHERE ds.date <  $1)             AS before,
+                SUM(te.amount) FILTER (WHERE ds.date BETWEEN $1 AND $2) AS during
+         FROM tab_entries te JOIN daily_sessions ds ON ds.id = te.session_id WHERE ds.date <= $2 GROUP BY te.member_id),
+       k AS (        -- given to the kitty
+         SELECT member_id,
+                SUM(amount) FILTER (WHERE collected_on <  $1)             AS before,
+                SUM(amount) FILTER (WHERE collected_on BETWEEN $1 AND $2) AS during
+         FROM member_collections WHERE collected_on <= $2 GROUP BY member_id),
+       p AS (        -- paid the shop from their own pocket (incl. any overpayment that became shop advance)
+         SELECT payer_member_id AS member_id,
+                SUM(amount) FILTER (WHERE d <  $1)             AS before,
+                SUM(amount) FILTER (WHERE d BETWEEN $1 AND $2) AS during
+         FROM (SELECT payer_member_id, amount, (paid_at    AT TIME ZONE $3)::date AS d FROM session_payments WHERE payer_member_id IS NOT NULL
+               UNION ALL
+               SELECT payer_member_id, amount, (created_at AT TIME ZONE $3)::date AS d FROM advance_ledger   WHERE payer_member_id IS NOT NULL AND amount > 0) x
+         WHERE d <= $2 GROUP BY payer_member_id)
+       SELECT m.id, m.name, m.is_active, m.is_admin,
+              COALESCE(k.before,0) + COALESCE(p.before,0) - COALESCE(c.before,0) AS opening,
+              COALESCE(c.during,0) AS consumed, COALESCE(k.during,0) AS collected, COALESCE(p.during,0) AS paid_shop
+       FROM members m LEFT JOIN c ON c.member_id=m.id LEFT JOIN k ON k.member_id=m.id LEFT JOIN p ON p.member_id=m.id
+       ORDER BY m.name`, [from, to, TZ]);
+
+    const members = rows.map(m => {
+      const o = { id: m.id, name: m.name, is_active: m.is_active, is_admin: m.is_admin,
+                  opening: r2(m.opening), consumed: r2(m.consumed), collected: r2(m.collected), paid_shop: r2(m.paid_shop) };
+      o.closing = r2(o.opening + o.collected + o.paid_shop - o.consumed);
+      return o;
+    }).filter(m => m.is_active || m.opening || m.consumed || m.collected || m.paid_shop);
+
+    const sum = k => r2(members.reduce((t, m) => t + m[k], 0));
+    const { rows: kt } = await pool.query(
+      `SELECT (SELECT COALESCE(SUM(amount),0) FROM member_collections) AS collected,
+              (SELECT COALESCE(SUM(amount),0) FROM session_payments WHERE from_kitty) +
+              (SELECT COALESCE(SUM(amount),0) FROM advance_ledger   WHERE from_kitty AND amount > 0) AS spent`);
+    const { rows: mp } = await pool.query(   // everything handed to the shop this month, by source
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE from_kitty),0) AS kitty,
+              COALESCE(SUM(amount) FILTER (WHERE payer_member_id IS NOT NULL),0) AS members,
+              COALESCE(SUM(amount) FILTER (WHERE NOT from_kitty AND payer_member_id IS NULL),0) AS others
+       FROM (SELECT amount, from_kitty, payer_member_id, (paid_at AT TIME ZONE $3)::date AS d FROM session_payments WHERE payer_name IS DISTINCT FROM 'Advance Credit'
+             UNION ALL
+             SELECT amount, from_kitty, payer_member_id, (created_at AT TIME ZONE $3)::date AS d FROM advance_ledger WHERE amount > 0) x
+       WHERE d BETWEEN $1 AND $2`, [from, to, TZ]);
+    const { rows: out } = await pool.query(
+      `SELECT COALESCE(SUM(GREATEST(COALESCE(te.total,0) - COALESCE(sp.paid,0),0)),0) AS pending
+       FROM daily_sessions ds
+       LEFT JOIN (SELECT session_id, SUM(amount) total FROM tab_entries GROUP BY session_id) te ON te.session_id=ds.id
+       LEFT JOIN (SELECT session_id, SUM(amount) paid  FROM session_payments GROUP BY session_id) sp ON sp.session_id=ds.id`);
+    const { rows: collections } = await pool.query(
+      `SELECT mc.*, m.name AS member_name, cb.name AS collected_by_name
+       FROM member_collections mc JOIN members m ON m.id=mc.member_id LEFT JOIN members cb ON cb.id=mc.collected_by
+       WHERE mc.collected_on BETWEEN $1 AND $2 ORDER BY mc.collected_on DESC, mc.id DESC`, [from, to]);
+
+    res.json({
+      month, from, to, members,
+      totals: { opening: sum('opening'), consumed: sum('consumed'), collected: sum('collected'), paid_shop: sum('paid_shop'), closing: sum('closing'),
+                owed: r2(members.reduce((t, m) => t + (m.closing < 0 ? -m.closing : 0), 0)),
+                credit: r2(members.reduce((t, m) => t + (m.closing > 0 ? m.closing : 0), 0)) },
+      kitty: { collected: r2(kt[0].collected), spent: r2(kt[0].spent), inHand: r2(kt[0].collected - kt[0].spent) },
+      shop: { paidFromKitty: r2(mp[0].kitty), paidByMembers: r2(mp[0].members), paidByOthers: r2(mp[0].others),
+              outstanding: r2(out[0].pending), advance: await getAdvanceBalance() },
+      collections: collections.map(c => ({ ...c, amount: r2(c.amount), collected_on: dateStr(c.collected_on) })),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Light call for the bill sheet: how much collected money is on hand to pay the shop with
+app.get('/api/accounts/kitty', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT (SELECT COALESCE(SUM(amount),0) FROM member_collections)
+            - (SELECT COALESCE(SUM(amount),0) FROM session_payments WHERE from_kitty)
+            - (SELECT COALESCE(SUM(amount),0) FROM advance_ledger WHERE from_kitty AND amount > 0) AS in_hand`);
+    res.json({ inHand: r2(rows[0].in_hand) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// One member's statement for a month: every day they ate, every rupee they put in, running balance
+app.get('/api/accounts/member/:id', auth, async (req, res) => {
+  try {
+    const { month, from, to } = monthRange(req.query.month);
+    const id = parseInt(req.params.id, 10);
+    const { rows: mem } = await pool.query('SELECT id,name FROM members WHERE id=$1', [id]);
+    if (!mem.length) return res.status(404).json({ error: 'Member not found' });
+    const { rows: ob } = await pool.query(
+      `SELECT (SELECT COALESCE(SUM(amount),0) FROM member_collections WHERE member_id=$1 AND collected_on < $2)
+            + (SELECT COALESCE(SUM(amount),0) FROM session_payments WHERE payer_member_id=$1 AND (paid_at AT TIME ZONE $3)::date < $2)
+            + (SELECT COALESCE(SUM(amount),0) FROM advance_ledger WHERE payer_member_id=$1 AND amount>0 AND (created_at AT TIME ZONE $3)::date < $2)
+            - (SELECT COALESCE(SUM(te.amount),0) FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id WHERE te.member_id=$1 AND ds.date < $2) AS opening`,
+      [id, from, TZ]);
+    const { rows: tx } = await pool.query(
+      `SELECT d, kind, label, amount FROM (
+         SELECT d, 'consumed' AS kind, STRING_AGG(item_name || ' ×' || q, ', ' ORDER BY first_at) AS label, -SUM(a) AS amount, 1 AS ord
+         FROM (SELECT ds.date AS d, te.item_name, SUM(te.qty) AS q, SUM(te.amount) AS a, MIN(te.added_at) AS first_at
+               FROM tab_entries te JOIN daily_sessions ds ON ds.id=te.session_id
+               WHERE te.member_id=$1 AND ds.date BETWEEN $2 AND $3 GROUP BY ds.date, te.item_name) g
+         GROUP BY d
+         UNION ALL
+         SELECT collected_on, CASE WHEN amount>0 THEN 'collected' ELSE 'refund' END,
+                (CASE WHEN mode='upi' THEN 'UPI' ELSE INITCAP(COALESCE(mode,'cash')) END) || COALESCE(' · ' || NULLIF(note,''), ''), amount, 2
+         FROM member_collections WHERE member_id=$1 AND collected_on BETWEEN $2 AND $3
+         UNION ALL
+         SELECT (paid_at AT TIME ZONE $4)::date, 'paid_shop', 'Paid the shop directly', amount, 3
+         FROM session_payments WHERE payer_member_id=$1 AND (paid_at AT TIME ZONE $4)::date BETWEEN $2 AND $3
+         UNION ALL
+         SELECT (created_at AT TIME ZONE $4)::date, 'paid_shop', 'Paid the shop (advance)', amount, 3
+         FROM advance_ledger WHERE payer_member_id=$1 AND amount>0 AND (created_at AT TIME ZONE $4)::date BETWEEN $2 AND $3
+       ) t ORDER BY d, ord`, [id, from, to, TZ]);
+    let bal = r2(ob[0].opening);
+    const lines = tx.map(t => { bal = r2(bal + parseFloat(t.amount)); return { date: dateStr(t.d), kind: t.kind, label: t.label, amount: r2(t.amount), balance: bal }; });
+    res.json({ month, from, to, member: mem[0], opening: r2(ob[0].opening), lines, closing: bal });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: record money received from a member (or a refund to them)
+app.post('/api/accounts/collections', auth, adminOnly, async (req, res) => {
+  try {
+    const memberId = parseInt(req.body.member_id, 10);
+    let amount = r2(req.body.amount);
+    if (!memberId) return res.status(400).json({ error: 'Choose a member' });
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1e6) return res.status(400).json({ error: 'Enter a valid amount' });
+    if (req.body.kind === 'refund') amount = -amount;
+    const { rows: mm } = await pool.query('SELECT id FROM members WHERE id=$1', [memberId]);
+    if (!mm.length) return res.status(400).json({ error: 'Unknown member' });
+    const mode = ['cash', 'upi', 'other'].includes(req.body.mode) ? req.body.mode : 'cash';
+    const on = /^\d{4}-\d{2}-\d{2}$/.test(req.body.collected_on || '') ? req.body.collected_on : null;
+    const { rows } = await pool.query(
+      `INSERT INTO member_collections (member_id, amount, mode, note, collected_on, collected_by)
+       VALUES ($1,$2,$3,$4,COALESCE($5::date, (NOW() AT TIME ZONE $7)::date),$6) RETURNING *`,
+      [memberId, amount, mode, String(req.body.note || '').slice(0, 200) || null, on, req.user.member_id, TZ]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/accounts/collections/:id', auth, adminOnly, async (req, res) => {
+  try { await pool.query('DELETE FROM member_collections WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── AI: voice / typed order understanding ──
