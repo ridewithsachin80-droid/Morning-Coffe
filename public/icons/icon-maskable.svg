@@ -1,46 +1,143 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs>
-    <!-- UpScale Signature Gradient -->
-    <linearGradient id="upscaleGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#7B2CBF" />
-      <stop offset="45%" stop-color="#4895EF" />
-      <stop offset="100%" stop-color="#4CC9F0" />
+    <!-- Deep Warm Dark Canvas -->
+    <radialGradient id="warmBg" cx="50%" cy="45%" r="75%">
+      <stop offset="0%" stop-color="#1C1815" />
+      <stop offset="60%" stop-color="#0F0C0A" />
+      <stop offset="100%" stop-color="#050403" />
+    </radialGradient>
+
+    <!-- Natural Warm Off-White Ceramic Gradient -->
+    <linearGradient id="naturalCeramic" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="50%" stop-color="#F3EFEA" />
+      <stop offset="85%" stop-color="#DDD5CA" />
+      <stop offset="100%" stop-color="#B8AEA0" />
     </linearGradient>
 
-    <!-- Sleek Glass/White Accents -->
-    <linearGradient id="cupOutline" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.6" />
-    </linearGradient>
-  </defs>
-<rect width="512" height="512" fill="#0A0B0E"/>
-<g transform="translate(256 256) scale(0.88) translate(-262 -236)">
+    <!-- Rich Espresso & Crema Radial Gradient -->
+    <radialGradient id="espressoSurface" cx="42%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#54311C" />
+      <stop offset="50%" stop-color="#311A0E" />
+      <stop offset="85%" stop-color="#1C0E07" />
+      <stop offset="100%" stop-color="#0D0603" />
+    </radialGradient>
 
-  <!-- Dark Dark App Icon Background -->
+    <!-- Natural Warm Gold Spoon Gradient -->
+    <linearGradient id="warmGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F2D082" />
+      <stop offset="50%" stop-color="#CFA349" />
+      <stop offset="100%" stop-color="#805C1B" />
+    </linearGradient>
+
+    <!-- Natural Roasted Coffee Bean Texture -->
+    <linearGradient id="beanGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3D2012" />
+      <stop offset="60%" stop-color="#241108" />
+      <stop offset="100%" stop-color="#120703" />
+    </linearGradient>
+
+    <!-- UpScale Signature Accent Gradient (Subtle) -->
+    <linearGradient id="upscaleGlow" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8E24AA" />
+      <stop offset="50%" stop-color="#3B82F6" />
+      <stop offset="100%" stop-color="#00D2FF" />
+    </linearGradient>
+
+    <!-- Realistic Soft Shadow -->
+    <filter id="naturalShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.85" />
+    </filter>
+
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs><rect width="512" height="512" fill="url(#warmBg)"/><g transform="translate(256 256) scale(1.1) translate(-256 -238)">
+
+  <!-- Canvas Base -->
+  
   
 
-  <!-- UpScale Coffee Steam / Upward Arrow -->
-  <g transform="translate(0, -15)">
-    <!-- Steam Rise Body -->
-    <path d="M 216 220 C 216 160, 240 140, 240 95 C 240 80, 256 80, 256 95 L 256 120" 
-          fill="none" stroke="url(#upscaleGrad)" stroke-width="32" stroke-linecap="round" />
-    
-    <!-- UpScale Signature Arrowhead -->
-    <path d="M 220 115 L 256 70 L 292 115" 
-          fill="none" stroke="url(#upscaleGrad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" />
-  </g>
+  <g transform="translate(0, 10)" filter="url(#naturalShadow)">
 
-  <!-- Modern Sleek Coffee Cup (White, minimalist) -->
-  <g transform="translate(0, 20)">
-    <!-- Cup Body -->
-    <path d="M 166 240 L 186 360 C 190 395, 322 395, 326 360 L 346 240 Z" 
-          fill="none" stroke="url(#cupOutline)" stroke-width="24" stroke-linejoin="round" stroke-linecap="round" />
+    <!-- Gentle Soft Steam Whisps -->
+    <g stroke="#F3EFEA" stroke-linecap="round" fill="none" opacity="0.25">
+      <path d="M 210 130 C 200 100 220 85 210 55" stroke-width="3" />
+      <path d="M 256 120 C 240 85 265 75 250 40" stroke-width="4" opacity="0.4" />
+      <path d="M 298 130 C 288 100 308 85 298 55" stroke-width="3" />
+    </g>
 
-    <!-- Cup Rim -->
-    <ellipse cx="256" cy="240" rx="90" ry="18" 
-             fill="#0A0B0E" stroke="url(#cupOutline)" stroke-width="20" />
+    <!-- Surface Contact Shadow -->
+    <ellipse cx="256" cy="370" rx="130" ry="22" fill="#000000" opacity="0.8" />
 
-    <!-- Handle -->
-    <path d="M 340 260 C 395 260, 395 335, 334 345" 
-          fill="none" stroke="url(#cupOutline)" stroke-width="20" stroke-linecap="round" />
+    <!-- Natural Roasted Coffee Beans Base Layer -->
+    <g filter="url(#naturalShadow)">
+      <!-- Left Bean Cluster -->
+      <g transform="translate(148, 352) rotate(-25)">
+        <path d="M -16 -9 C -24 9 10 21 20 5 C 26 -8 -2 -19 -16 -9 Z" fill="url(#beanGradient)" stroke="#0D0603" stroke-width="1" />
+        <path d="M -11 -2 C -2 3 5 1 12 7" fill="none" stroke="#54311C" stroke-width="1.5" stroke-linecap="round" />
+      </g>
+      <g transform="translate(178, 362) rotate(15)">
+        <path d="M -14 -8 C -21 8 8 18 17 4 C 22 -7 -2 -16 -14 -8 Z" fill="url(#beanGradient)" stroke="#0D0603" stroke-width="1" />
+        <path d="M -9 -1 C -1 3 5 2 10 6" fill="none" stroke="#54311C" stroke-width="1.5" stroke-linecap="round" />
+      </g>
+
+      <!-- Right Bean Cluster -->
+      <g transform="translate(332, 358) rotate(35)">
+        <path d="M -15 -8 C -22 8 9 19 18 4 C 24 -7 -2 -17 -15 -8 Z" fill="url(#beanGradient)" stroke="#0D0603" stroke-width="1" />
+        <path d="M -10 -1 C -1 3 5 1 11 6" fill="none" stroke="#54311C" stroke-width="1.5" stroke-linecap="round" />
+      </g>
+      <g transform="translate(362, 346) rotate(-10)">
+        <path d="M -13 -7 C -19 7 8 16 16 3 C 21 -6 -2 -15 -13 -7 Z" fill="url(#beanGradient)" stroke="#0D0603" stroke-width="1" />
+        <path d="M -8 -1 C 0 2 5 1 9 5" fill="none" stroke="#54311C" stroke-width="1.2" stroke-linecap="round" />
+      </g>
+    </g>
+
+    <!-- Natural Vintage Gold Stirring Spoon Resting in Cup -->
+    <g transform="translate(-14, 0)">
+      <!-- Spoon Shaft -->
+      <path d="M 180 115 Q 194 140 210 185" fill="none" stroke="url(#warmGold)" stroke-width="6" stroke-linecap="round" />
+      
+      <!-- Organic Leaf-Style Spoon Head Accent -->
+      <path d="M 180 115 C 168 100 178 82 188 88 C 198 94 190 110 180 115 Z" fill="url(#warmGold)" stroke="#805C1B" stroke-width="1" />
+      <path d="M 181 112 Q 183 98 186 91" fill="none" stroke="#5E420E" stroke-width="1" />
+    </g>
+
+    <!-- Ceramic Cup Body & Handle -->
+    <!-- Natural Sculpted Handle -->
+    <path d="M 180 195 C 105 195 98 290 178 296 C 122 282 126 210 180 212 Z" 
+          fill="url(#naturalCeramic)" />
+
+    <!-- Cup Body Silhouette -->
+    <path d="M 172 180 L 194 322 C 198 348, 314 348, 318 322 L 340 180 Z" 
+          fill="url(#naturalCeramic)" />
+
+    <!-- Soft Curved Shading (Real Ceramic Contours) -->
+    <path d="M 194 322 C 198 348, 314 348, 318 322 L 340 180 C 310 200 202 200 172 180 Z" 
+          fill="#000000" opacity="0.08" />
+
+    <!-- Delicate Natural Diagonal Ribbing -->
+    <g stroke="#B8AEA0" stroke-width="1.8" opacity="0.45" stroke-linecap="round">
+      <path d="M 192 210 Q 256 226 320 210" fill="none" />
+      <path d="M 195 236 Q 256 252 317 236" fill="none" />
+      <path d="M 198 262 Q 256 278 314 262" fill="none" />
+      <path d="M 201 288 Q 256 304 311 288" fill="none" />
+    </g>
+
+    <!-- Outer Rim of Ceramic Cup -->
+    <ellipse cx="256" cy="180" rx="84" ry="22" fill="url(#naturalCeramic)" stroke="#EADFCF" stroke-width="2" />
+
+    <!-- Inner Dark Espresso Liquid -->
+    <ellipse cx="256" cy="180" rx="75" ry="17" fill="url(#espressoSurface)" />
+
+    <!-- Natural Crema Ring Reflection -->
+    <ellipse cx="256" cy="180" rx="71" ry="14" fill="none" stroke="url(#warmGold)" stroke-width="2" opacity="0.65" />
+
+    <!-- Subtle UpScale Sparkle Brand Seal Accent -->
+    <g transform="translate(256, 386)">
+      <path d="M 0 -10 Q 0 0 10 0 Q 0 0 0 10 Q 0 0 -10 0 Q 0 0 0 -10 Z" fill="url(#upscaleGlow)" filter="url(#softGlow)" opacity="0.9" />
+      <path d="M 0 -8 Q 0 0 8 0 Q 0 0 0 8 Q 0 0 -8 0 Q 0 0 0 -8 Z" fill="url(#upscaleGlow)" />
+    </g>
+
   </g>
 </g></svg>

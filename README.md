@@ -46,6 +46,12 @@ Railway deploys automatically on every push. First deploy runs the schema and se
 
 ---
 
+## 🎨 Theme — "Ceramic & Gold"
+Dark, warm-black UI whose palette comes from the app icon: ceramic off-white text, vintage-gold amounts and
+primary actions, jade/amber/rose for paid/partial/errors. The UpScale gradient appears in one place only —
+around the AI mic. All colours are CSS variables at the top of `public/index.html` (`--gold`, `--surface`, …).
+Fonts: Instrument Serif (titles, amounts) + Hanken Grotesk (UI). Printing falls back to a light scheme.
+
 ## 📱 Install as an app (own icon, no Chrome badge)
 
 The app ships a web manifest, icon set (`public/icons/`, from `icon.svg`) and a service worker, so Chrome
