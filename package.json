@@ -1,6 +1,6 @@
 {
   "name": "morning-accounts",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Office Coffee Shop Morning Accounts PWA",
   "main": "server.js",
   "scripts": {

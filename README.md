@@ -32,6 +32,15 @@ In Railway → your service → **Variables**:
 NODE_ENV = production
 ```
 
+### 4b. Turn on AI voice ordering
+In Railway → your service → **Variables**, add the same keys used in FitLife:
+```
+GROQ_API_KEY   = gsk_...     (primary: Whisper speech-to-text + LLM order parsing)
+GEMINI_API_KEY = ...         (automatic fallback if Groq is down / rate-limited)
+```
+No keys? The app still works — it falls back to the browser's own dictation (Chrome/Android)
+plus a built-in rule parser, and typed orders always work.
+
 ### 5. Deploy
 Railway deploys automatically on every push. First deploy runs the schema and seeds items.
 
@@ -59,6 +68,21 @@ Then log in as admin and start adding members.
 2. **Admin** logs in → goes to **Dashboard** → reviews pending orders
 3. Admin clicks each order → **Approve** it
 4. At end of day/month → select approved orders → **Mark as Paid** (records payment to coffee shop)
+
+### ✨ AI order (voice or typed)
+On **Add Items**, tap the mic and just say it — English, Kannada or Hindi, mixed is fine:
+- *"Two coffee and one maddur vada"*
+- *"Eradu kaapi, ondu tea for Ravi"* — adds the tea to **Ravi's** tab (shows "added by you")
+- *"Twenty rupees coffee"* — a spoken price picks the right variant
+- *"My usual"* / *"same as yesterday"* — repeats your last order
+
+Recording stops by itself when you stop talking. You always get a confirmation sheet
+(edit item / person / qty) before anything is saved. Lines the AI wasn't sure about are
+highlighted. Ambiguous items (e.g. two Coffee rates) resolve to what that person usually orders.
+
+How it works: `audio → Groq Whisper → Groq LLM → validated against menu & members → confirm → /api/tab`.
+Fallback chain: Groq → Gemini → built-in rules. AI output is never written directly to the DB.
+Each tab line records `added_by` and `source` (tap / voice / text). Limit: 20 AI requests/min per member.
 
 ### Reports:
 - Go to **Report** tab → pick date range → Generate

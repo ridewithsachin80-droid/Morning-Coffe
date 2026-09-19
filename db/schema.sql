@@ -104,6 +104,11 @@ WHERE ds.status = 'paid'
   AND te.total > 0
   AND NOT EXISTS (SELECT 1 FROM session_payments sp WHERE sp.session_id = ds.id);
 
+-- AI-first ordering: who physically entered the line (may differ from member_id when
+-- someone orders on a colleague's behalf) and how it was entered (tap | voice | text)
+ALTER TABLE tab_entries ADD COLUMN IF NOT EXISTS added_by INT REFERENCES members(id);
+ALTER TABLE tab_entries ADD COLUMN IF NOT EXISTS source   VARCHAR(10) DEFAULT 'tap';
+
 -- Fix PIN column if too small (from v1)
 ALTER TABLE members ALTER COLUMN pin TYPE VARCHAR(60);
 

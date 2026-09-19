@@ -6,6 +6,7 @@ const { v4: uuid } = require('uuid');
 const cookieParser = require('cookie-parser');
 const compression  = require('compression');
 const path         = require('path');
+const ai           = require('./ai');
 
 if (!process.env.DATABASE_URL) {
   console.error('❌ DATABASE_URL not set. Link PostgreSQL plugin in Railway → Variables.');
@@ -129,6 +130,13 @@ app.delete('/api/items/:id', auth, adminOnly, async (req, res) => {
 });
 
 // ── MEMBERS ──
+// Everyone: lightweight id+name list, so an order can be added on behalf of a colleague
+app.get('/api/members/names', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id,name FROM members WHERE is_active=TRUE ORDER BY name');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/members', auth, adminOnly, async (req, res) => {
   const { rows } = await pool.query(
     'SELECT id,name,is_admin,is_active,created_at FROM members ORDER BY is_admin DESC,name');
@@ -266,21 +274,33 @@ app.get('/api/sessions/by-date', auth, async (req, res) => {
 // round is started automatically.
 app.post('/api/tab', auth, async (req, res) => {
   try {
-    const date  = req.body.date || new Date().toISOString().split('T')[0];
-    const sess  = await getOrCreateOpenSession(date);
+    const date    = req.body.date || new Date().toISOString().split('T')[0];
+    const entries = req.body.entries; // [{ item_id, qty, member_id? }]  member_id omitted = me
+    if (!Array.isArray(entries) || !entries.length) return res.status(400).json({ error: 'No items provided' });
+    const source  = ['tap', 'voice', 'text'].includes(req.body.source) ? req.body.source : 'tap';
 
-    const entries = req.body.entries; // [{ item_id, qty }]
-    if (!entries || !entries.length) return res.status(400).json({ error: 'No items provided' });
-
-    const inserted = [];
+    // Validate everything BEFORE opening a round, so a bad request never creates an empty round
+    const { rows: activeMembers } = await pool.query('SELECT id FROM members WHERE is_active=TRUE');
+    const memberIds = new Set(activeMembers.map(m => m.id));
+    const valid = [];
     for (const e of entries) {
-      if (!e.qty || e.qty <= 0) continue;
+      const qty = parseInt(e.qty, 10);
+      if (!Number.isFinite(qty) || qty <= 0 || qty > 50) continue;
       const { rows: item } = await pool.query('SELECT * FROM items WHERE id=$1 AND is_active=TRUE', [e.item_id]);
       if (!item.length) continue;
+      const forMember = e.member_id ? parseInt(e.member_id, 10) : req.user.member_id;
+      if (!memberIds.has(forMember)) return res.status(400).json({ error: 'Unknown or inactive member in order' });
+      valid.push({ item: item[0], qty, forMember });
+    }
+    if (!valid.length) return res.status(400).json({ error: 'No valid items in order' });
+
+    const sess = await getOrCreateOpenSession(date);
+    const inserted = [];
+    for (const v of valid) {
       const { rows } = await pool.query(
-        `INSERT INTO tab_entries (session_id,member_id,item_id,item_name,rate,qty)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [sess.id, req.user.member_id, e.item_id, item[0].name, item[0].rate, e.qty]);
+        `INSERT INTO tab_entries (session_id,member_id,item_id,item_name,rate,qty,added_by,source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+        [sess.id, v.forMember, v.item.id, v.item.name, v.item.rate, v.qty, req.user.member_id, source]);
       inserted.push(rows[0]);
     }
     res.json({ ok: true, entries: inserted, session: sess });
@@ -295,7 +315,8 @@ app.delete('/api/tab/:id', auth, async (req, res) => {
       [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     if (rows[0].status !== 'open') return res.status(400).json({ error: 'Session is locked — payment already started' });
-    if (!req.user.is_admin && rows[0].member_id !== req.user.member_id)
+    // You can remove your own entries, and entries you added on someone else's behalf
+    if (!req.user.is_admin && rows[0].member_id !== req.user.member_id && rows[0].added_by !== req.user.member_id)
       return res.status(403).json({ error: 'Not your entry' });
     await pool.query('DELETE FROM tab_entries WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -308,7 +329,9 @@ app.get('/api/tab/mine', auth, async (req, res) => {
     const sess = await resolveSession(req.query);
     if (!sess) return res.json({ session: null, entries: [], total: 0 });
     const { rows } = await pool.query(
-      `SELECT te.* FROM tab_entries te WHERE te.session_id=$1 AND te.member_id=$2 ORDER BY te.added_at`,
+      `SELECT te.*, ab.name as added_by_name
+       FROM tab_entries te LEFT JOIN members ab ON ab.id = te.added_by
+       WHERE te.session_id=$1 AND te.member_id=$2 ORDER BY te.added_at`,
       [sess.id, req.user.member_id]);
     const total = rows.reduce((s, r) => s + parseFloat(r.amount), 0);
     res.json({ session: sess, entries: rows, total });
@@ -559,6 +582,72 @@ app.get('/api/reports', auth, async (req, res) => {
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── AI: voice / typed order understanding ──
+// These endpoints only *interpret* an order and return suggested lines.
+// Nothing is saved until the user confirms and the client calls POST /api/tab.
+
+// Small per-member limiter so a stuck mic button can't burn through the AI quota
+const aiHits = new Map();
+function aiLimit(req, res, next) {
+  const now = Date.now(), id = req.user.member_id;
+  const hits = (aiHits.get(id) || []).filter(t => now - t < 60000);
+  if (hits.length >= 20) return res.status(429).json({ error: 'Too many AI requests — wait a minute and try again' });
+  hits.push(now); aiHits.set(id, hits);
+  next();
+}
+
+// Everything the parser needs to know: menu, members, habits, the speaker's last order
+async function buildAiContext(user) {
+  const [{ rows: items }, { rows: members }, { rows: usualRows }, { rows: lastRows }] = await Promise.all([
+    pool.query('SELECT id,name,rate FROM items WHERE is_active=TRUE ORDER BY display_order,id'),
+    pool.query('SELECT id,name FROM members WHERE is_active=TRUE ORDER BY name'),
+    pool.query(
+      `SELECT te.member_id, te.item_id, SUM(te.qty) as n
+       FROM tab_entries te JOIN items i ON i.id = te.item_id AND i.is_active=TRUE
+       WHERE te.added_at > NOW() - INTERVAL '60 days'
+       GROUP BY te.member_id, te.item_id ORDER BY te.member_id, n DESC`),
+    pool.query(
+      `SELECT te.item_id, SUM(te.qty)::int as qty
+       FROM tab_entries te JOIN items i ON i.id = te.item_id AND i.is_active=TRUE
+       WHERE te.member_id=$1 AND te.session_id = (
+         SELECT session_id FROM tab_entries WHERE member_id=$1 ORDER BY added_at DESC LIMIT 1)
+       GROUP BY te.item_id`, [user.member_id]),
+  ]);
+  const usuals = {};
+  for (const r of usualRows) {
+    if (!usuals[r.member_id]) usuals[r.member_id] = [];
+    if (usuals[r.member_id].length < 3) usuals[r.member_id].push({ item_id: r.item_id });
+  }
+  return { items, members, usuals, lastOrder: lastRows, speaker: { id: user.member_id, name: user.name } };
+}
+
+app.get('/api/ai/status', auth, (req, res) => res.json(ai.status()));
+
+// Typed order (or text dictated by the browser's own speech recognition)
+app.post('/api/ai/text', auth, aiLimit, async (req, res) => {
+  try {
+    const text = String(req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Say or type what you had' });
+    res.json(await ai.parseText(text, await buildAiContext(req.user)));
+  } catch (e) { console.error('AI text error:', e.message); res.status(500).json({ error: 'Could not understand that — try again' }); }
+});
+
+// Recorded audio, sent as the raw request body (Content-Type: audio/*)
+app.post('/api/ai/voice', auth, aiLimit,
+  express.raw({ type: req => /^(audio\/|video\/webm|application\/octet-stream)/i.test(req.headers['content-type'] || ''), limit: '8mb' }),
+  async (req, res) => {
+    try {
+      if (!Buffer.isBuffer(req.body) || req.body.length < 800)
+        return res.status(400).json({ error: "Didn't catch anything — hold the mic a little longer" });
+      const lang = ['auto', 'en', 'kn', 'hi'].includes(req.query.lang) ? req.query.lang : 'auto';
+      const out = await ai.parseAudio(req.body, req.headers['content-type'], await buildAiContext(req.user), lang);
+      res.json(out);
+    } catch (e) {
+      console.error('AI voice error:', e.message, e.detail || '');
+      res.status(e.code === 'NO_STT' ? 503 : 500).json({ error: e.message, code: e.code || 'AI_ERROR' });
+    }
+  });
 
 // ── CATCH-ALL ──
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));

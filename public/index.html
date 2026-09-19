@@ -183,6 +183,42 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
 .section-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--mocha);margin-bottom:8px;}
 .add-confirm-strip{background:#f0faf4;border:1.5px solid #a8d5b5;border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;animation:toastIn .3s ease;}
 .add-confirm-strip .check{color:var(--success);font-size:1.1rem;}
+
+/* AI ORDER (voice / typed) */
+.ai-card{background:linear-gradient(135deg,var(--espresso),var(--roast) 55%,var(--mocha));border-radius:16px;padding:18px 16px;margin-bottom:12px;box-shadow:var(--shadow-lg);color:var(--cream);text-align:center;}
+.ai-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.ai-tag{font-size:.66rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gold);}
+.ai-lang{background:rgba(255,255,255,.1);color:var(--cream);border:1px solid rgba(255,255,255,.25);border-radius:12px;font-size:.7rem;padding:3px 8px;font-family:'DM Sans',sans-serif;}
+.ai-lang option{color:var(--espresso);}
+.mic-btn{width:84px;height:84px;border-radius:50%;border:none;cursor:pointer;font-size:2rem;background:linear-gradient(135deg,var(--caramel),var(--gold));color:var(--white);box-shadow:0 6px 22px rgba(232,169,58,.45);transition:transform .15s;margin:6px auto 8px;display:flex;align-items:center;justify-content:center;position:relative;}
+.mic-btn:active{transform:scale(.94);}
+.mic-btn.rec{background:linear-gradient(135deg,#d64534,#b33a2a);box-shadow:0 0 0 0 rgba(214,69,52,.6);animation:micPulse 1.3s infinite;}
+.mic-btn.busy{background:rgba(255,255,255,.15);box-shadow:none;cursor:wait;}
+.mic-btn:disabled{opacity:.8;}
+@keyframes micPulse{0%{box-shadow:0 0 0 0 rgba(214,69,52,.55)}70%{box-shadow:0 0 0 22px rgba(214,69,52,0)}100%{box-shadow:0 0 0 0 rgba(214,69,52,0)}}
+.mic-level{position:absolute;inset:-6px;border-radius:50%;border:3px solid rgba(255,255,255,.55);transform:scale(1);transition:transform .08s linear;pointer-events:none;display:none;}
+.mic-btn.rec .mic-level{display:block;}
+.ai-status{font-weight:600;font-size:.95rem;min-height:1.3em;}
+.ai-hint{font-size:.76rem;opacity:.75;margin-top:3px;line-height:1.45;}
+.ai-text-row{display:flex;gap:8px;margin-top:12px;}
+.ai-text-row input{flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:var(--white);font-family:'DM Sans',sans-serif;font-size:.88rem;}
+.ai-text-row input::placeholder{color:rgba(245,230,200,.55);}
+.ai-text-row input:focus{outline:none;border-color:var(--gold);}
+.ai-text-row button{padding:0 14px;border-radius:10px;border:none;background:var(--gold);color:var(--espresso);font-weight:700;cursor:pointer;font-size:1rem;}
+.ai-heard{background:var(--latte);border-radius:10px;padding:9px 12px;font-size:.84rem;color:var(--mocha);margin-bottom:12px;font-style:italic;}
+.ai-line{background:var(--milk);border:1.5px solid var(--cream);border-radius:12px;padding:10px;margin-bottom:8px;}
+.ai-line.unsure{border-color:var(--gold);background:#fff8e6;}
+.ai-line-top{display:flex;gap:8px;align-items:center;}
+.ai-line-top select{flex:1;min-width:0;}
+.ai-line-bot{display:flex;gap:8px;align-items:center;margin-top:8px;}
+.ai-line-bot select{flex:1;min-width:0;}
+.ai-line select{padding:7px 9px;border:1.5px solid var(--cream);border-radius:8px;background:var(--white);font-family:'DM Sans',sans-serif;font-size:.84rem;color:var(--espresso);}
+.ai-line .qty-ctrl{margin-top:0;}
+.ai-unsure-note{font-size:.72rem;color:#8a5b00;margin-top:6px;}
+.ai-unmatched{background:#fde8e8;border-radius:10px;padding:8px 12px;font-size:.8rem;color:var(--danger);margin-bottom:10px;}
+.or-sep{display:flex;align-items:center;gap:10px;color:var(--mocha);font-size:.72rem;text-transform:uppercase;letter-spacing:.8px;margin:2px 0 12px;}
+.or-sep::before,.or-sep::after{content:'';flex:1;height:1px;background:var(--cream);}
+.src-chip{font-size:.68rem;color:var(--mocha);}
 </style>
 </head>
 <body>
@@ -265,8 +301,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
       <div id="sessionStatusBanner"></div>
     </div>
 
+    <!-- AI order: speak or type, confirm, done -->
+    <div class="ai-card" id="aiCard">
+      <div class="ai-card-top">
+        <span class="ai-tag">✨ AI Order</span>
+        <select class="ai-lang" id="aiLang" onchange="aiSaveLang()" title="Spoken language">
+          <option value="auto">Auto</option><option value="en">English</option><option value="kn">ಕನ್ನಡ</option><option value="hi">हिंदी</option>
+        </select>
+      </div>
+      <button class="mic-btn" id="micBtn" onclick="aiMicTap()" aria-label="Speak your order"><span id="micIcon">🎙️</span><span class="mic-level" id="micLevel"></span></button>
+      <div class="ai-status" id="aiStatus">Tap and say what you had</div>
+      <div class="ai-hint" id="aiHint">“Two coffee and one vada… one tea for Ravi” &nbsp;·&nbsp; “my usual”</div>
+      <div class="ai-text-row">
+        <input type="text" id="aiText" placeholder="…or type it: 2 coffee, 1 bonda" autocomplete="off" enterkeyhint="send" onkeydown="if(event.key==='Enter')aiSendText()">
+        <button onclick="aiSendText()" aria-label="Send">➤</button>
+      </div>
+    </div>
+
+    <!-- Recent adds confirmation -->
+    <div id="recentAdds"></div>
+
     <div class="card">
-      <div class="card-title">☕ What did you take?</div>
+      <div class="card-title">☕ Or tap what you took</div>
       <div class="item-grid" id="quickItemGrid"></div>
       <div class="divider"></div>
       <div class="flex-between" style="margin-bottom:12px;">
@@ -278,8 +334,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
       </button>
     </div>
 
-    <!-- Recent adds confirmation -->
-    <div id="recentAdds"></div>
   </div>
 
   <!-- ══ MY TAB (member) ══ -->
@@ -417,6 +471,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--latte);color:var(--espres
     <div id="advanceModalBody"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('advanceModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="aiConfirmModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-title">✨ Here's what I heard</div>
+    <div id="aiConfirmBody"></div>
+    <div class="modal-actions" style="justify-content:space-between;">
+      <button class="btn btn-ghost" style="white-space:nowrap;" onclick="aiRetry()">🎙️ Retry</button>
+      <div class="flex gap-8">
+        <button class="btn btn-ghost" onclick="closeModal('aiConfirmModal')">Cancel</button>
+        <button class="btn btn-success" style="white-space:nowrap;" id="aiConfirmBtn" onclick="aiConfirm()">✅ Add</button>
+      </div>
     </div>
   </div>
 </div>
@@ -610,6 +678,7 @@ function initAddItems() {
   loadSessionStatus();
   document.getElementById('recentAdds').innerHTML = '';
   document.getElementById('addDate').onchange = () => { loadSessionStatus(); };
+  aiInit();
 }
 
 async function loadSessionStatus() {
@@ -698,6 +767,249 @@ async function submitItems() {
   } catch(e) { toast('Error: '+e.message); }
 }
 
+
+// ════════════════════════════════════════════════════════
+// AI ORDER  (voice + typed → confirm → tab)
+// ════════════════════════════════════════════════════════
+const AI_MAX_MS = 20000;         // hard stop
+const AI_SILENCE_MS = 1700;      // stop this long after you finish talking
+let aiCaps = null;               // { stt, llm } from the server
+let aiMembers = [];              // [{id,name}] for the "for whom" picker
+let aiLines = [];                // lines awaiting confirmation
+let aiMeta = { transcript:'', unmatched:[] };
+let aiSource = 'voice';
+let aiState = 'idle';            // idle | rec | busy
+let aiRec = null, aiStream = null, aiChunks = [], aiTimers = [], aiAudioCtx = null, aiRaf = null, aiSpeechRec = null;
+
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function aiInit() {
+  try { document.getElementById('aiLang').value = localStorage.getItem('mc_lang') || 'auto'; } catch(e){}
+  if (!aiCaps) { try { aiCaps = await api('GET','/api/ai/status'); } catch(e){ aiCaps = {stt:false,llm:false}; } }
+  if (!aiMembers.length) { try { aiMembers = await api('GET','/api/members/names'); } catch(e){ aiMembers = []; } }
+  const canRecord  = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+  const canDictate = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (!((aiCaps.stt && canRecord) || canDictate)) {
+    // No way to capture speech on this device — typed AI order still works
+    document.getElementById('micBtn').style.display = 'none';
+    document.getElementById('aiLang').style.display = 'none';
+    aiSetStatus('Type what you had', 'Voice isn’t available on this browser — typing works the same way');
+  }
+}
+function aiSaveLang(){ try { localStorage.setItem('mc_lang', document.getElementById('aiLang').value); } catch(e){} }
+
+function aiSetStatus(main, hint) {
+  document.getElementById('aiStatus').textContent = main;
+  if (hint !== undefined) document.getElementById('aiHint').textContent = hint;
+}
+function aiSetState(st) {
+  aiState = st;
+  const b = document.getElementById('micBtn');
+  b.classList.toggle('rec', st==='rec');
+  b.classList.toggle('busy', st==='busy');
+  b.disabled = st==='busy';
+  document.getElementById('micIcon').innerHTML = st==='rec' ? '⏹️' : st==='busy' ? '<span class="spinner"></span>' : '🎙️';
+  if (st==='idle') aiSetStatus('Tap and say what you had', '“Two coffee and one vada… one tea for Ravi”  ·  “my usual”');
+}
+
+function aiMicTap() {
+  if (aiState==='rec')  return aiStopRecording();
+  if (aiState==='busy') return;
+  const canRecord = !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+  if (aiCaps?.stt && canRecord) aiStartRecording(); else aiStartDictation();
+}
+
+// ── Path A: record audio → server (Whisper) ──
+async function aiStartRecording() {
+  try {
+    aiStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+  } catch(e) {
+    toast(e.name==='NotAllowedError' ? '🎙️ Allow microphone access to order by voice' : 'Microphone not available');
+    return;
+  }
+  const mime = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'].find(m => MediaRecorder.isTypeSupported?.(m)) || '';
+  try { aiRec = new MediaRecorder(aiStream, mime ? { mimeType:mime, audioBitsPerSecond:32000 } : undefined); }
+  catch(e) { aiRec = new MediaRecorder(aiStream); }
+  aiChunks = [];
+  let heardSpeech = false;
+  aiRec.ondataavailable = e => { if (e.data && e.data.size) aiChunks.push(e.data); };
+  aiRec.onstop = () => {
+    const type = (aiRec.mimeType || mime || 'audio/webm');
+    aiCleanupAudio();
+    const blob = new Blob(aiChunks, { type });
+    if (!heardSpeech && blob.size < 6000) { aiSetState('idle'); toast("Didn't hear anything — try again"); return; }
+    aiSendAudio(blob, type);
+  };
+  aiRec.start();
+  aiSetState('rec');
+  aiSetStatus('Listening…', 'Tap again when you’re done — or just stop talking');
+  if (navigator.vibrate) navigator.vibrate(30);
+  aiTimers.push(setTimeout(aiStopRecording, AI_MAX_MS));
+
+  // Level meter + auto-stop on silence. Purely a convenience: if it fails, tap-to-stop still works.
+  try {
+    aiAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const an = aiAudioCtx.createAnalyser(); an.fftSize = 1024;
+    aiAudioCtx.createMediaStreamSource(aiStream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    const ring = document.getElementById('micLevel');
+    const t0 = performance.now(); let lastLoud = t0, floor = 0.01;
+    const tick = () => {
+      if (aiState!=='rec') return;
+      an.getFloatTimeDomainData(buf);
+      let sum=0; for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
+      const rms = Math.sqrt(sum/buf.length), now = performance.now();
+      if (now - t0 < 400) floor = Math.max(floor, rms*1.5);           // learn room noise for the first 0.4s
+      const loud = rms > Math.max(0.02, floor*2);
+      if (loud) { lastLoud = now; heardSpeech = true; }
+      ring.style.transform = `scale(${1 + Math.min(rms*6, .45)})`;
+      if (heardSpeech && now - lastLoud > AI_SILENCE_MS) return aiStopRecording();
+      if (!heardSpeech && now - t0 > 7000) return aiStopRecording();
+      aiRaf = requestAnimationFrame(tick);
+    };
+    aiRaf = requestAnimationFrame(tick);
+  } catch(e) { heardSpeech = true; }
+}
+function aiStopRecording() {
+  if (aiSpeechRec) { try { aiSpeechRec.stop(); } catch(e){} return; }   // dictation mode
+  if (aiRec && aiRec.state!=='inactive') { aiSetState('busy'); aiSetStatus('Understanding…',''); try { aiRec.stop(); } catch(e){ aiCleanupAudio(); aiSetState('idle'); } }
+}
+function aiCleanupAudio() {
+  aiTimers.forEach(clearTimeout); aiTimers = [];
+  if (aiRaf) cancelAnimationFrame(aiRaf), aiRaf = null;
+  try { aiStream?.getTracks().forEach(t=>t.stop()); } catch(e){}
+  try { aiAudioCtx?.close(); } catch(e){}
+  aiStream = null; aiAudioCtx = null;
+}
+async function aiSendAudio(blob, type) {
+  aiSetState('busy'); aiSetStatus('Understanding…','');
+  try {
+    const lang = document.getElementById('aiLang').value || 'auto';
+    const r = await fetch('/api/ai/voice?lang='+encodeURIComponent(lang), { method:'POST', headers:{ 'Content-Type': type.split(';')[0] }, body: blob });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) {
+      if (d.code==='NO_STT') { aiCaps.stt = false; }   // next tap will use on-device dictation instead
+      throw new Error(d.error || 'Voice failed');
+    }
+    aiSource = 'voice';
+    aiShowResult(d);
+  } catch(e) { toast('⚠️ '+e.message+' — you can also type it'); }
+  finally { aiSetState('idle'); }
+}
+
+// ── Path B: on-device dictation (no server speech key) → server parses the text ──
+function aiStartDictation() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Voice isn’t supported here — type your order instead'); document.getElementById('aiText').focus(); return; }
+  if (aiSpeechRec) { try { aiSpeechRec.stop(); } catch(e){} return; }
+  const lang = document.getElementById('aiLang').value;
+  const r = aiSpeechRec = new SR();
+  r.lang = lang==='kn' ? 'kn-IN' : lang==='hi' ? 'hi-IN' : 'en-IN';
+  r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
+  let finalText = '';
+  r.onstart  = () => { aiSetState('rec'); aiSetStatus('Listening…','Speak now'); };
+  r.onresult = ev => {
+    let txt=''; for (const res of ev.results) txt += res[0].transcript+' ';
+    finalText = txt.trim(); aiSetStatus('Listening…', '“'+finalText+'”');
+  };
+  r.onerror  = ev => { if (ev.error==='not-allowed') toast('🎙️ Allow microphone access to order by voice'); else if (ev.error!=='no-speech' && ev.error!=='aborted') toast('Voice error: '+ev.error); };
+  r.onend    = () => { aiSpeechRec = null; if (finalText) { aiSource='voice'; aiParseText(finalText); } else { aiSetState('idle'); } };
+  try { r.start(); } catch(e) { aiSpeechRec=null; toast('Could not start microphone'); }
+}
+
+// ── Typed order ──
+function aiSendText() {
+  const inp = document.getElementById('aiText'), text = inp.value.trim();
+  if (!text) { inp.focus(); return; }
+  aiSource = 'text'; aiParseText(text);
+}
+async function aiParseText(text) {
+  aiSetState('busy'); aiSetStatus('Understanding…','');
+  try { aiShowResult(await api('POST','/api/ai/text',{ text })); }
+  catch(e) { toast('⚠️ '+e.message); }
+  finally { aiSetState('idle'); }
+}
+
+// ── Confirmation sheet ──
+function aiShowResult(d) {
+  aiLines = (d.lines||[]).map(l=>({...l}));
+  aiMeta = { transcript: d.transcript || '', unmatched: d.unmatched || [] };
+  if (!aiLines.length && !aiMeta.unmatched.length && !aiMeta.transcript) { toast("Didn't catch an order — try again"); return; }
+  aiRenderConfirm();
+  openModal('aiConfirmModal');
+}
+function aiRenderConfirm() {
+  const body = document.getElementById('aiConfirmBody');
+  const t = aiMeta.transcript, um = aiMeta.unmatched;
+  const itemOpts = sel => allItems.map(i=>`<option value="${i.id}" ${i.id===sel?'selected':''}>${esc(i.name)} — ₹${parseFloat(i.rate).toFixed(0)}</option>`).join('');
+  const meId = currentUser.memberId;
+  const members = aiMembers.length ? aiMembers : [{id:meId,name:currentUser.name}];
+  const memOpts = sel => members.map(m=>`<option value="${m.id}" ${m.id===sel?'selected':''}>${m.id===meId?'Me ('+esc(m.name)+')':esc(m.name)}</option>`).join('');
+  let total = 0;
+  const rows = aiLines.map((l,idx)=>{
+    const it = allItems.find(i=>i.id===l.item_id); const rate = it?parseFloat(it.rate):0; total += rate*l.qty;
+    return `<div class="ai-line ${l.sure===false?'unsure':''}">
+      <div class="ai-line-top">
+        <select onchange="aiEdit(${idx},'item_id',this.value)" aria-label="Item">${itemOpts(l.item_id)}</select>
+        <button class="tab-entry-del" onclick="aiRemoveLine(${idx})" title="Remove">✕</button>
+      </div>
+      <div class="ai-line-bot">
+        <select onchange="aiEdit(${idx},'member_id',this.value)" aria-label="For whom">${memOpts(l.member_id)}</select>
+        <div class="qty-ctrl">
+          <button class="qty-btn" onclick="aiQty(${idx},-1)">−</button>
+          <div class="qty-val">${l.qty}</div>
+          <button class="qty-btn" onclick="aiQty(${idx},1)">+</button>
+        </div>
+        <div class="bold" style="color:var(--caramel);min-width:48px;text-align:right;">₹${(rate*l.qty).toLocaleString('en-IN')}</div>
+      </div>
+      ${l.sure===false?`<div class="ai-unsure-note">⚠️ I wasn’t sure about this one — please check</div>`:''}
+    </div>`;
+  }).join('');
+  body.innerHTML = `
+    ${t?`<div class="ai-heard">“${esc(t)}”</div>`:''}
+    ${um.length?`<div class="ai-unmatched">Not on the menu: <b>${um.map(esc).join(', ')}</b></div>`:''}
+    ${rows || '<div class="empty-state"><div class="icon">🤔</div><p>I couldn’t match that to anything on the menu.<br>Try again, or tap the items below.</p></div>'}
+    ${aiLines.length?`<div class="flex-between" style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="aiAddLine()">＋ Add line</button>
+      <span><span class="text-muted">Total </span><span class="grand-total-lbl">₹${total.toLocaleString('en-IN')}</span></span></div>`:''}`;
+  const btn = document.getElementById('aiConfirmBtn');
+  btn.style.display = aiLines.length ? '' : 'none';
+  btn.textContent = `✅ Add ₹${total.toLocaleString('en-IN')}`;
+}
+function aiEdit(idx, key, val) { aiLines[idx][key] = parseInt(val,10); aiLines[idx].sure = true; aiRenderConfirm(); }
+function aiQty(idx, d) { aiLines[idx].qty = Math.max(1, Math.min(50, aiLines[idx].qty + d)); aiRenderConfirm(); }
+function aiRemoveLine(idx) { aiLines.splice(idx,1); aiRenderConfirm(); }
+function aiAddLine() { if (allItems.length) { aiLines.push({ item_id: allItems[0].id, qty:1, member_id: currentUser.memberId, sure:true }); aiRenderConfirm(); } }
+function aiRetry() { closeModal('aiConfirmModal'); if (document.getElementById('micBtn').style.display!=='none') setTimeout(aiMicTap, 250); else document.getElementById('aiText').focus(); }
+
+async function aiConfirm() {
+  if (!aiLines.length) return;
+  const date = document.getElementById('addDate').value || todayStr();
+  const btn = document.getElementById('aiConfirmBtn'); btn.disabled = true;
+  try {
+    const entries = aiLines.map(l=>({ item_id:l.item_id, qty:l.qty, member_id:l.member_id }));
+    await api('POST','/api/tab',{ date, entries, source: aiSource });
+    const meId = currentUser.memberId; let total = 0;
+    const desc = aiLines.map(l=>{
+      const it = allItems.find(i=>i.id===l.item_id); total += (it?parseFloat(it.rate):0)*l.qty;
+      const who = l.member_id!==meId ? ' → '+(aiMembers.find(m=>m.id===l.member_id)?.name||'') : '';
+      return `${it?it.name:'Item'} ×${l.qty}${who}`;
+    }).join(', ');
+    const strip = document.createElement('div');
+    strip.className = 'add-confirm-strip card';
+    strip.innerHTML = `<div><div class="bold">✅ Added ${aiSource==='voice'?'by voice 🎙️':'✨'}</div><div class="text-muted">${esc(desc)}</div></div>
+      <div class="bold" style="color:var(--caramel);">₹${total.toLocaleString('en-IN')}</div>`;
+    const ra = document.getElementById('recentAdds');
+    ra.insertBefore(strip, ra.firstChild);
+    if (ra.children.length > 3) ra.removeChild(ra.lastChild);
+    document.getElementById('aiText').value = '';
+    closeModal('aiConfirmModal');
+    loadSessionStatus();
+    if (navigator.vibrate) navigator.vibrate([20,40,20]);
+    toast('✅ Added!');
+  } catch(e) { toast('Error: '+e.message); }
+  finally { btn.disabled = false; }
+}
+
 // ════════════════════════════════════════════════════════
 // ROUND SELECTOR (shared by My Tab & Live Board — multiple sessions/day)
 // ════════════════════════════════════════════════════════
@@ -751,7 +1063,7 @@ async function loadMyTab() {
         <div class="tab-entry" id="entry-${e.id}">
           <div class="tab-entry-info">
             <div class="tab-entry-name">${e.item_name} ×${e.qty}</div>
-            <div class="tab-entry-time">${fmtTime(e.added_at)}</div>
+            <div class="tab-entry-time">${fmtTime(e.added_at)}${e.source==='voice'?' · 🎙️':e.source==='text'?' · ⌨️':''}${e.added_by && e.added_by!==e.member_id && e.added_by_name?' · added by '+esc(e.added_by_name):''}</div>
           </div>
           <div class="tab-entry-amt">₹${parseFloat(e.amount).toFixed(0)}</div>
           ${canDelete?`<button class="tab-entry-del" onclick="deleteEntry(${e.id})" title="Remove">✕</button>`:''}
