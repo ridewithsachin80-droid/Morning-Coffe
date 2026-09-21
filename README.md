@@ -148,6 +148,9 @@ served with a versioned, cache-forever URL. Photos show on the Add Items cards a
 - **Member balance = money they put in − their share.** "Put in" = cash/UPI you received from them
   (**＋ Receive money**) + anything they paid the shop from their own pocket. Negative = to pay, positive = credit.
   Balances carry forward month to month ("brought forward").
+- **＋ Add what each paid** opens one sheet listing every member with an amount box: type what each gave, or use
+  *Same amount for all* / *Fill dues*, pick mode and date once, and save them all together. *One member / refund*
+  (under the month's list) is there for single entries and refunds.
 - **Kitty in hand = everything collected − payments to the shop made from the kitty.**
 - When paying the shop, **Paid from** now asks the source: 💼 *Kitty* (collected money), a *member's own pocket*
   (credited to their account), or *someone else* (recorded, credited to nobody). Older payments are matched to

@@ -999,6 +999,32 @@ app.post('/api/accounts/collections', auth, adminOnly, async (req, res) => {
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Admin: record what several members paid in one go (all-or-nothing)
+app.post('/api/accounts/collections/bulk', auth, adminOnly, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const entries = (Array.isArray(req.body.entries) ? req.body.entries : [])
+      .map(e => ({ member_id: parseInt(e.member_id, 10), amount: r2(e.amount) }))
+      .filter(e => e.member_id && Number.isFinite(e.amount) && e.amount > 0);
+    if (!entries.length) return res.status(400).json({ error: 'Enter an amount for at least one member' });
+    if (entries.some(e => e.amount > 1e6)) return res.status(400).json({ error: 'Amount too large' });
+    const { rows: mm } = await client.query('SELECT id FROM members WHERE id = ANY($1::int[])', [entries.map(e => e.member_id)]);
+    if (mm.length !== new Set(entries.map(e => e.member_id)).size) return res.status(400).json({ error: 'Unknown member in the list' });
+    const mode = ['cash', 'upi', 'other'].includes(req.body.mode) ? req.body.mode : 'cash';
+    const on = /^\d{4}-\d{2}-\d{2}$/.test(req.body.collected_on || '') ? req.body.collected_on : null;
+    const note = String(req.body.note || '').slice(0, 200) || null;
+    await client.query('BEGIN');
+    for (const e of entries) {
+      await client.query(
+        `INSERT INTO member_collections (member_id, amount, mode, note, collected_on, collected_by)
+         VALUES ($1,$2,$3,$4,COALESCE($5::date, (NOW() AT TIME ZONE $7)::date),$6)`,
+        [e.member_id, e.amount, mode, note, on, req.user.member_id, TZ]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, count: entries.length, total: r2(entries.reduce((t, e) => t + e.amount, 0)) });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 app.delete('/api/accounts/collections/:id', auth, adminOnly, async (req, res) => {
   try { await pool.query('DELETE FROM member_collections WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

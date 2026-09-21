@@ -345,6 +345,11 @@ option{background:var(--raised);color:var(--ceramic);}
 .chip{border:1px solid var(--line-strong);background:transparent;color:var(--muted);border-radius:20px;padding:6px 12px;font-size:.78rem;font-weight:600;cursor:pointer;}
 .chip.on{border-color:rgba(207,163,73,.5);background:var(--gold-wash);color:var(--gold-hi);}
 .chip:disabled{cursor:default;}
+.bulk-row{display:grid;grid-template-columns:auto 1fr 110px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);}
+.bulk-row:last-child{border-bottom:none;}
+.bulk-row .member-avatar{width:32px;height:32px;font-size:.72rem;}
+.bulk-row input{text-align:right;font-weight:600;color:var(--gold-hi);}
+.bulk-due{font-size:.72rem;margin-top:1px;}
 </style>
 </head>
 <body>
@@ -547,7 +552,7 @@ option{background:var(--raised);color:var(--ceramic);}
         <input type="month" class="form-input" id="accMonth" style="width:auto;padding:6px 10px;font-size:.86rem;" onchange="loadAccounts()">
         <button class="btn btn-ghost btn-sm" onclick="accShiftMonth(1)" aria-label="Next month">›</button>
       </div>
-      <button class="btn btn-primary btn-sm" id="accCollectBtn" style="display:none;" onclick="openCollect()">＋ Receive money</button>
+      <button class="btn btn-primary btn-sm" id="accCollectBtn" style="display:none;" onclick="openBulkPaid()">＋ Add what each paid</button>
     </div>
     <div id="accContent"></div>
   </div>
@@ -647,6 +652,29 @@ option{background:var(--raised);color:var(--ceramic);}
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('collectModal')">Cancel</button>
       <button class="btn btn-primary" id="collectSaveBtn" onclick="saveCollect()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="bulkPaidModal">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-title">What each member paid</div>
+    <p class="text-muted" style="margin:-6px 0 12px;">Type an amount next to everyone who gave money. Leave the rest blank.</p>
+    <div class="flex gap-8" style="margin-bottom:10px;align-items:center;">
+      <input type="number" class="form-input" id="bulkSame" inputmode="decimal" min="1" placeholder="Same amount for all, e.g. 500" style="flex:1;">
+      <button class="btn btn-ghost btn-sm" onclick="bulkFill('same')">Apply</button>
+      <button class="btn btn-ghost btn-sm" id="bulkDuesBtn" onclick="bulkFill('dues')">Fill dues</button>
+    </div>
+    <div id="bulkRows"></div>
+    <div class="flex gap-8" style="margin-top:12px;">
+      <div class="form-group" style="flex:1;"><label class="form-label">Mode</label><select class="form-input" id="bulkMode"><option value="cash">Cash</option><option value="upi">UPI</option><option value="other">Other</option></select></div>
+      <div class="form-group" style="flex:1.2;"><label class="form-label">Date</label><input type="date" class="form-input" id="bulkDate"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Note (optional)</label><input type="text" class="form-input" id="bulkNote" maxlength="200" placeholder="e.g. September contribution"></div>
+    <div class="flex-between"><span class="text-muted">Total received</span><span class="grand-total-lbl" id="bulkTotal">₹0</span></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('bulkPaidModal')">Cancel</button>
+      <button class="btn btn-primary" id="bulkSaveBtn" onclick="saveBulkPaid()">Save</button>
     </div>
   </div>
 </div>
@@ -1797,6 +1825,7 @@ async function loadAccounts() {
       <div class="card">
         <div class="card-title">Money received in ${monthLabel(a.month).split(' ')[0]}</div>
         ${colls || '<p class="text-muted">Nothing recorded this month.</p>'}
+        ${currentUser.isAdmin ? `<div class="flex gap-8" style="margin-top:12px;flex-wrap:wrap;"><button class="btn btn-ghost btn-sm" onclick="openBulkPaid()">＋ Add what each paid</button><button class="btn btn-ghost btn-sm" onclick="openCollect()">One member / refund</button></div>` : ''}
       </div>
       <div class="flex gap-8" style="flex-wrap:wrap;margin-bottom:8px;">
         <button class="btn btn-primary" onclick="shareAccounts()">📤 Share month summary</button>
@@ -1835,6 +1864,48 @@ function toggleSharer(id) {
   cur.has(id) ? cur.delete(id) : cur.add(id);
   if (!cur.size) return toast('At least one member has to share the bill');
   setSplit('equal', [...cur]);
+}
+
+
+// ── add what each member paid, all on one sheet ──
+async function openBulkPaid() {
+  if (!currentUser.isAdmin) return toast('Only the admin can record money received');
+  if (!accData) { try { accData = await api('GET', `/api/accounts?month=${accMonthStr()}`); } catch (e) { return toast('Error: ' + e.message); } }
+  const kittyOnly = accData.split.mode === 'kitty';
+  document.getElementById('bulkDuesBtn').style.display = kittyOnly ? 'none' : '';
+  document.getElementById('bulkRows').innerHTML = accData.members.filter(m => m.is_active || m.closing).map(m => `
+    <div class="bulk-row">
+      <div class="member-avatar">${initials(m.name)}</div>
+      <div><div class="bold" style="font-size:.9rem;">${esc(m.name)}</div>
+        <div class="bulk-due ${kittyOnly?'':balCls(m.closing)}"><span class="l">${kittyOnly ? 'put in '+inr(m.collected + m.paid_shop)+' so far' : (m.closing < -0.009 ? 'owes '+inr(-m.closing) : m.closing > 0.009 ? 'in credit '+inr(m.closing) : 'settled')}</span></div></div>
+      <input type="number" class="form-input" inputmode="decimal" min="0" step="1" placeholder="₹" data-mid="${m.id}" data-due="${m.closing < 0 ? Math.ceil(-m.closing) : 0}" oninput="bulkTotal()">
+    </div>`).join('');
+  document.getElementById('bulkSame').value = ''; document.getElementById('bulkNote').value = '';
+  document.getElementById('bulkMode').value = 'cash'; document.getElementById('bulkDate').value = todayStr();
+  bulkTotal(); openModal('bulkPaidModal');
+}
+function bulkFill(how) {
+  const same = parseFloat(document.getElementById('bulkSame').value);
+  if (how === 'same' && !(same > 0)) return toast('Type the amount first');
+  document.querySelectorAll('#bulkRows input').forEach(i => { i.value = how === 'same' ? same : (+i.dataset.due || ''); });
+  bulkTotal();
+}
+function bulkTotal() {
+  let t = 0, n = 0; document.querySelectorAll('#bulkRows input').forEach(i => { const v = parseFloat(i.value); if (v > 0) { t += v; n++; } });
+  document.getElementById('bulkTotal').textContent = inr(t);
+  document.getElementById('bulkSaveBtn').textContent = n ? `Save ${n} payment${n>1?'s':''}` : 'Save';
+}
+async function saveBulkPaid() {
+  const entries = [...document.querySelectorAll('#bulkRows input')].map(i => ({ member_id:+i.dataset.mid, amount:parseFloat(i.value) })).filter(e => e.amount > 0);
+  if (!entries.length) return toast('Enter an amount for at least one member');
+  const btn = document.getElementById('bulkSaveBtn'); btn.disabled = true;
+  try {
+    const r = await api('POST', '/api/accounts/collections/bulk', { entries, mode:document.getElementById('bulkMode').value,
+      collected_on:document.getElementById('bulkDate').value, note:document.getElementById('bulkNote').value.trim() });
+    closeModal('bulkPaidModal'); toast(`${inr(r.total)} received from ${r.count} member${r.count>1?'s':''}`);
+    accData = null; loadAccounts();
+  } catch (e) { toast('Error: ' + e.message); }
+  finally { btn.disabled = false; }
 }
 
 // ── receive / refund ──
